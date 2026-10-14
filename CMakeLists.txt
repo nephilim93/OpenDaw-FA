@@ -129,6 +129,8 @@ set(OpenDaw_SOURCES
     src/utils/WaveformCache.h       src/utils/WaveformCache.cpp
     src/utils/ThemeManager.h        src/utils/ThemeManager.cpp
     src/utils/IconFont.h
+    src/music/Theory.h             src/music/Theory.cpp
+    src/music/Patterns.h           src/music/Patterns.cpp
     src/ai/AiTypes.h
     src/ai/AiAudioAnalysis.h      src/ai/AiAudioAnalysis.cpp
     src/ai/AiToolDefs.h            src/ai/AiToolDefs.cpp

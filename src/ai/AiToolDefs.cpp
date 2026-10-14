@@ -612,6 +612,60 @@ QJsonArray AiToolDefs::allTools()
     }
 
     {
+        QJsonObject stringArr;
+        stringArr["type"] = "array";
+        stringArr["items"] = QJsonObject{{"type", "string"}};
+        stringArr["description"] = "Chords in order, each lasting beats_per_chord, repeated to fill "
+            "the length. Chord symbols (Gm, Ebmaj7, F7, Dm7b5, Csus4) or Roman numerals "
+            "(i, VI, V7, ii°, bVII) when key is set.";
+
+        QJsonObject stepsArr;
+        stepsArr["type"] = "array";
+        stepsArr["items"] = QJsonObject{{"type", "integer"}};
+        stepsArr["description"] = "Optional custom order of chord tones, 1-based, repeated per chord. "
+            "Numbers past the chord's tones continue an octave up: for a triad, [1,2,3,4] = "
+            "root, third, fifth, octave. Overrides pattern.";
+
+        QJsonObject patternProp = prop("string", "How chord tones are played: up, down, up_down, "
+            "down_up, random (repeatable via seed) or chord (block chords). Default up.");
+        patternProp["enum"] = QJsonArray({"up", "down", "up_down", "down_up", "random", "chord"});
+
+        QJsonObject props;
+        props["track"] = trackProp();
+        props["clip_index"] = propNumber("Existing MIDI clip to add to. Omit to create a new clip "
+            "at start_beat that fits the pattern.", 0, 10000);
+        props["start_beat"] = propNumber("Where the pattern starts: relative to the clip start when "
+            "clip_index is given, otherwise the new clip's position on the timeline. Default 0.",
+            0.0, 100000.0);
+        props["chords"] = stringArr;
+        props["key"] = prop("string", "Key or scale, e.g. 'G minor', 'Bb major', 'D dorian'. "
+            "Required for Roman numerals; recommended always.");
+        props["pattern"] = patternProp;
+        props["steps"] = stepsArr;
+        props["rate"] = prop("string", "Note value of each step: 1/4, 1/8, 1/16 or 1/32, with a "
+            "'t' suffix for triplets (1/8t). Default 1/8.");
+        props["bars"] = propNumber("Length in bars (4 beats each). Default: one chord per bar, "
+            "once through the chord list.", 0.25, 1000);
+        props["beats_per_chord"] = propNumber("Beats each chord lasts. Default 4 (one bar).", 0.25, 64);
+        props["octave"] = propNumber("Octave of the chord roots; 4 puts C at middle C (60). Default 4.", 0, 8);
+        props["octaves"] = propNumber("How many octaves the chord tones span. Default 1.", 1, 4);
+        props["velocity"] = propNumber("Base velocity. Default 90.", 1, 127);
+        props["accent"] = propNumber("Added to the velocity of steps on the beat. Default 12.", 0, 60);
+        props["gate"] = propNumber("Note length as a fraction of a step (0.05-1). Default 0.9.", 0.05, 1.0);
+        props["swing"] = propNumber("0-100: delays every second step, 100 = triplet feel. Default 0.", 0, 100);
+        props["seed"] = propNumber("Seed for the random pattern. Default 1.", 0, 1000000);
+        props["channel"] = propNumber("MIDI channel for the notes (1-16). Default 1.", 1, 16);
+        props["name"] = prop("string", "Name for a newly created clip.");
+        tools.append(makeTool("generate_midi_pattern",
+            "Generate an arpeggio, broken-chord or block-chord pattern from a chord progression, "
+            "instead of listing every note. One call writes the whole pattern (e.g. 16 bars of "
+            "1/8 notes = 128 notes) as one undoable step and returns how the chords were read. "
+            "Prefer this over add_midi_notes for arpeggios, ostinatos, comping and other "
+            "repeating chord-based parts. Creates the clip when clip_index is omitted.",
+            props, QJsonArray({"track", "chords"})));
+    }
+
+    {
         QJsonObject props;
         props["track"] = trackProp();
         tools.append(makeTool("get_clips_on_track",
