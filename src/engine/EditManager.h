@@ -63,6 +63,7 @@ public:
     te::MidiClip* importMidiFileToTrack(te::AudioTrack& track,
                                         const juce::File& midiFile,
                                         double startBeat);
+    bool exportMidiFile(const juce::File& destFile);
 
     bool isMidiTrack(te::AudioTrack* track) const;
     bool isTrackMono(te::AudioTrack* track) const;

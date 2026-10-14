@@ -342,8 +342,10 @@ void MainWindow::createMenus()
     fileMenu->addSeparator();
     fileMenu->addAction("&Export Audio...", QKeySequence("Ctrl+Shift+E"), this,
         &MainWindow::onExportAudio);
+    fileMenu->addAction("Export &MIDI...", this, &MainWindow::onExportMidi);
 
     fileMenu->addSeparator();
+    fileMenu->addAction("&Import MIDI...", this, &MainWindow::onImportMidi);
     fileMenu->addAction("Import &Video...", this, [this]() {
         QString path = QFileDialog::getOpenFileName(
             this, "Import Video", {},
@@ -1047,6 +1049,37 @@ void MainWindow::onSaveProjectAs()
     editMgr_.saveEditAs(file);
     if (aiChatWidget_) aiChatWidget_->saveChatSessions();
     updateWindowTitle();
+}
+
+void MainWindow::onImportMidi()
+{
+    QString path = QFileDialog::getOpenFileName(
+        this, "Import MIDI", {}, "MIDI Files (*.mid *.midi);;All Files (*)");
+    if (path.isEmpty() || !editMgr_.edit()) return;
+
+    auto* track = editMgr_.addMidiTrack();
+    if (!track) return;
+
+    auto& ts = editMgr_.edit()->tempoSequence;
+    double startBeat = ts.toBeats(editMgr_.transport().getPosition()).inBeats();
+
+    if (!editMgr_.importMidiFileToTrack(*track, juce::File(path.toStdString()), startBeat)) {
+        editMgr_.removeTrack(track);
+        QMessageBox::warning(this, "Import MIDI", "Could not read the MIDI file.");
+    }
+}
+
+void MainWindow::onExportMidi()
+{
+    QString path = QFileDialog::getSaveFileName(
+        this, "Export MIDI", "untitled.mid", "MIDI Files (*.mid)");
+    if (path.isEmpty()) return;
+    if (!path.endsWith(".mid", Qt::CaseInsensitive) && !path.endsWith(".midi", Qt::CaseInsensitive))
+        path += ".mid";
+
+    if (!editMgr_.exportMidiFile(juce::File(path.toStdString())))
+        QMessageBox::warning(this, "Export MIDI",
+                             "Nothing was exported. The project needs at least one MIDI track.");
 }
 
 void MainWindow::onExportAudio()
