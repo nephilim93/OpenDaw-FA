@@ -1,76 +1,26 @@
-#include "PluginScanner.h"
+﻿#include "PluginScanner.h"
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <QDebug>
 
 namespace OpenDaw {
 
-PluginScanWorker::PluginScanWorker(te::Engine& engine)
-    : engine_(engine)
-{
-}
-
-void PluginScanWorker::doScan()
-{
-    struct FormatInfo {
-        juce::AudioPluginFormat* format;
-        const char*              label;
-    };
-
-    juce::VST3PluginFormat vst3;
-#if JUCE_PLUGINHOST_VST
-    juce::VSTPluginFormat  vst2;
-#endif
-
-    FormatInfo formats[] = {
-        { &vst3, "VST3" },
-#if JUCE_PLUGINHOST_VST
-        { &vst2, "VST2" },
-#endif
-    };
-
-    juce::StringArray allFiles;
-    juce::Array<juce::AudioPluginFormat*> fileFormats;
-
-    for (auto& fmt : formats) {
-        auto paths = fmt.format->getDefaultLocationsToSearch();
-        auto files = fmt.format->searchPathsForPlugins(paths, true, true);
-        for (auto& f : files) {
-            allFiles.add(f);
-            fileFormats.add(fmt.format);
-        }
-    }
-
-    int total = allFiles.size();
-    for (int i = 0; i < total; ++i) {
-        juce::OwnedArray<juce::PluginDescription> descriptions;
-        try {
-            fileFormats[i]->findAllTypesForFile(descriptions, allFiles[i]);
-        } catch (...) {
-            qWarning() << "[PluginScanner] plugin crashed during scan:"
-                        << allFiles[i].toRawUTF8();
-            continue;
-        }
-
-        for (auto* desc : descriptions) {
-            emit pluginFound(*desc);
-            emit scanProgress(QString::fromStdString(desc->name.toStdString()),
-                              i + 1, total);
-        }
-    }
-
-    emit scanFinished();
-}
-
 PluginScanner::PluginScanner(AudioEngine& engine, QObject* parent)
     : QObject(parent), audioEngine_(engine)
 {
+    formats_.push_back(std::make_unique<juce::VST3PluginFormat>());
+#if JUCE_PLUGINHOST_VST
+    formats_.push_back(std::make_unique<juce::VSTPluginFormat>());
+#endif
+
+    scanTimer_.setInterval(0);
+    connect(&scanTimer_, &QTimer::timeout, this, &PluginScanner::scanNextFile);
+
     loadCachedList();
 }
 
 PluginScanner::~PluginScanner()
 {
-    workerThread_.quit();
-    workerThread_.wait();
+    scanTimer_.stop();
 }
 
 void PluginScanner::startScan()
@@ -78,31 +28,63 @@ void PluginScanner::startScan()
     if (scanning_)
         return;
 
-    if (workerThread_.isRunning()) {
-        workerThread_.quit();
-        workerThread_.wait();
+    scanning_ = true;
+    scanners_.clear();
+    currentScanner_ = 0;
+    filesScanned_ = 0;
+    totalFiles_ = 0;
+
+    // The dead man's pedal records the file being scanned; if a plugin crashes
+    // the app, it is blacklisted and skipped on the next scan.
+    auto pedal = getDeadMansPedalFile();
+    pedal.getParentDirectory().createDirectory();
+
+    for (auto& fmt : formats_) {
+        auto paths = fmt->getDefaultLocationsToSearch();
+        totalFiles_ += fmt->searchPathsForPlugins(paths, true, true).size();
+        auto scanner = std::make_unique<juce::PluginDirectoryScanner>(
+            getPluginList(), *fmt, paths, true, pedal, false);
+        scanners_.push_back(std::move(scanner));
     }
 
-    scanning_ = true;
+    scanTimer_.start();
+}
 
-    auto* worker = new PluginScanWorker(audioEngine_.engine());
-    worker->moveToThread(&workerThread_);
+void PluginScanner::scanNextFile()
+{
+    if (currentScanner_ >= scanners_.size()) {
+        finishScan();
+        return;
+    }
 
-    connect(&workerThread_, &QThread::finished, worker, &QObject::deleteLater);
-    connect(worker, &PluginScanWorker::scanProgress,
-            this, &PluginScanner::scanProgress);
-    connect(worker, &PluginScanWorker::pluginFound, this,
-            [this](const juce::PluginDescription& desc) {
-                getPluginList().addType(desc);
-            }, Qt::QueuedConnection);
-    connect(worker, &PluginScanWorker::scanFinished, this, [this]() {
-        scanning_ = false;
-        saveCachedList();
-        emit scanFinished();
-    });
+    auto& scanner = *scanners_[currentScanner_];
+    juce::String name;
+    if (!scanner.scanNextFile(true, name)) {
+        ++currentScanner_;
+        return;
+    }
 
-    workerThread_.start();
-    QMetaObject::invokeMethod(worker, &PluginScanWorker::doScan);
+    ++filesScanned_;
+    emit scanProgress(QString::fromUtf8(name.toRawUTF8()), filesScanned_, totalFiles_);
+}
+
+void PluginScanner::finishScan()
+{
+    scanTimer_.stop();
+
+    for (auto& scanner : scanners_)
+        for (auto& failed : scanner->getFailedFiles())
+            qWarning() << "[PluginScanner] failed to load:" << failed.toRawUTF8();
+
+    scanners_.clear();
+    scanning_ = false;
+    saveCachedList();
+    emit scanFinished();
+}
+
+juce::File PluginScanner::getDeadMansPedalFile() const
+{
+    return getCacheFile().getSiblingFile("plugin-scan-pending.txt");
 }
 
 juce::KnownPluginList& PluginScanner::getPluginList()

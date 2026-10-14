@@ -2,27 +2,16 @@
 
 #include "AudioEngine.h"
 #include <QObject>
-#include <QThread>
+#include <QTimer>
+#include <juce_audio_processors/juce_audio_processors.h>
+#include <memory>
+#include <vector>
 
 namespace OpenDaw {
 
-class PluginScanWorker : public QObject {
-    Q_OBJECT
-public:
-    explicit PluginScanWorker(te::Engine& engine);
-
-public slots:
-    void doScan();
-
-signals:
-    void scanProgress(const QString& pluginName, int current, int total);
-    void pluginFound(const juce::PluginDescription& desc);
-    void scanFinished();
-
-private:
-    te::Engine& engine_;
-};
-
+// Scans plugins on the message thread (plugins such as Kontakt initialise
+// GUI frameworks on load and crash if loaded off the main thread). Work is
+// split into one file per timer tick so the UI stays responsive.
 class PluginScanner : public QObject {
     Q_OBJECT
 
@@ -43,8 +32,17 @@ signals:
     void scanFinished();
 
 private:
+    void scanNextFile();
+    void finishScan();
+    juce::File getDeadMansPedalFile() const;
+
     AudioEngine& audioEngine_;
-    QThread workerThread_;
+    QTimer scanTimer_;
+    std::vector<std::unique_ptr<juce::AudioPluginFormat>> formats_;
+    std::vector<std::unique_ptr<juce::PluginDirectoryScanner>> scanners_;
+    size_t currentScanner_ = 0;
+    int filesScanned_ = 0;
+    int totalFiles_ = 0;
     bool scanning_ = false;
 };
 
