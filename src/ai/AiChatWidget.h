@@ -41,6 +41,7 @@ protected:
 
 signals:
     void requestRaise();
+    void settingsRequested();
 
 private:
     void setupUi();
@@ -62,7 +63,6 @@ private:
     void finalizeStreamingBubble();
     void scrollToBottom();
 
-    void showSettingsDialog();
     void clearChatUi();
 
     void startNewChat();

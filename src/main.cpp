@@ -10,6 +10,7 @@
 #include "ui/MainWindow.h"
 #include "ui/SplashScreen.h"
 #include "utils/IconFont.h"
+#include "utils/AppPaths.h"
 
 #ifdef _WIN32
 #include <windows.h>
@@ -92,7 +93,9 @@ int main(int argc, char* argv[])
         "QToolTip { background: #3a3a3a; color: #dcdcdc; border: 1px solid #666; "
         "padding: 3px; font-size: 11px; }");
 
-    QFile lf(QApplication::applicationDirPath() + "/OpenDaw.log");
+    const QString logDir = OpenDaw::logDirectory();
+    QDir().mkpath(logDir);
+    QFile lf(logDir + "/OpenDaw.log");
     if (lf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
         logFile = &lf;
         qInstallMessageHandler(logMessageHandler);

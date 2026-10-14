@@ -58,6 +58,8 @@ private:
 
     void onNewProject();
     void onOpenProject();
+    void openSettings(int page);
+    QString projectDialogStartDir(bool forNewProject) const;
     void onSaveProject();
     void onSaveProjectAs();
     void onExportAudio();

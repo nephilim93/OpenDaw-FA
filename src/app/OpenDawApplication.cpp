@@ -23,6 +23,7 @@ bool OpenDawApplication::initialize()
     audioEngine_ = std::make_unique<AudioEngine>();
     audioEngine_->setDefaultAudioDevice();
     audioEngine_->restoreSavedAudioSettings();
+    audioEngine_->applyMidiDeviceSettings();
 
     qDebug() << "[init] creating EditManager";
     editManager_ = std::make_unique<EditManager>(*audioEngine_);

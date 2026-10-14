@@ -1,4 +1,5 @@
 #include "EditManager.h"
+#include <QSettings>
 #include "utils/FFmpegUtils.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <tracktion_engine/tracktion_engine.h>
@@ -358,7 +359,7 @@ void EditManager::resumeEngine()
 
     audioEngine_.setDefaultAudioDevice();
     audioEngine_.restoreSavedAudioSettings();
-    audioEngine_.enableAllMidiInputDevices();
+    audioEngine_.applyMidiDeviceSettings();
 
     if (edit_) {
         enableAllWaveInputDevices();
@@ -2060,7 +2061,12 @@ QString EditManager::autosaveFileId() const
 
 void EditManager::startAutosave()
 {
-    autosaveTimer_.start(60000);
+    const int minutes = QSettings().value("system/autosaveMinutes", 1).toInt();
+    if (minutes <= 0) {
+        autosaveTimer_.stop();
+        return;
+    }
+    autosaveTimer_.start(minutes * 60000);
 }
 
 void EditManager::stopAutosave()

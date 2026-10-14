@@ -19,12 +19,16 @@ public:
 
     void setDefaultAudioDevice();
     void restoreSavedAudioSettings();
+    void saveAudioSettings();
     juce::StringArray getAvailableInputDevices() const;
     juce::StringArray getAvailableOutputDevices() const;
 
     juce::StringArray getAvailableMidiInputDevices() const;
     juce::StringArray getAvailableMidiOutputDevices() const;
-    void enableAllMidiInputDevices();
+    // Enables MIDI devices according to the Settings window: inputs are on
+    // unless switched off, outputs follow the saved list (untouched if the
+    // user never chose).
+    void applyMidiDeviceSettings();
 
 private:
     std::unique_ptr<te::Engine> engine_;

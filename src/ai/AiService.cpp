@@ -20,7 +20,7 @@ AiService::AiService(EditManager* editMgr, AudioEngine* audioEngine,
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
-QString AiService::apiKey() const
+QString AiService::apiKey()
 {
     QSettings s;
     return s.value("ai/apiKey").toString();
@@ -32,7 +32,7 @@ void AiService::setApiKey(const QString& key)
     s.setValue("ai/apiKey", key);
 }
 
-QString AiService::model() const
+QString AiService::model()
 {
     QSettings s;
     return s.value("ai/model", kDefaultModel).toString();
@@ -44,7 +44,7 @@ void AiService::setModel(const QString& m)
     s.setValue("ai/model", m);
 }
 
-bool AiService::confirmDestructive() const
+bool AiService::confirmDestructive()
 {
     QSettings s;
     return s.value("ai/confirmDestructive", true).toBool();
@@ -56,7 +56,7 @@ void AiService::setConfirmDestructive(bool confirm)
     s.setValue("ai/confirmDestructive", confirm);
 }
 
-bool AiService::previewMixPlanMode() const
+bool AiService::previewMixPlanMode()
 {
     QSettings s;
     return s.value("ai/previewMixPlanMode", false).toBool();
