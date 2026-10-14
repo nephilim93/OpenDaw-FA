@@ -7,8 +7,41 @@
 namespace OpenDaw {
 
 static const QString kApiUrl = "https://api.anthropic.com/v1/messages";
-static const QString kDefaultModel = "claude-opus-4-6";
-static const int kMaxTokens = 8192;
+static const QString kDefaultModel = "claude-opus-5-5";
+// Thinking counts toward max_tokens, so leave room for it as well as the reply.
+static const int kMaxTokens = 32000;
+
+namespace {
+
+// What each model family accepts. Unknown (custom) IDs get no optional
+// parameters, which every model accepts.
+struct ModelTraits {
+    bool effort = false;          // output_config.effort
+    bool xhighEffort = false;     // the "xhigh" level (Opus 4.7 and later)
+    bool fallbackDefault = false; // fallbacks: "default" (Claude API)
+    bool preservedThinking = false; // thinking blocks bound to the conversation
+};
+
+ModelTraits traitsFor(const QString& model)
+{
+    ModelTraits t;
+    auto is = [&](const char* prefix) { return model.startsWith(prefix); };
+
+    if (is("claude-fable-5-1") || is("claude-opus-5-5") || is("claude-sonnet-5-5")) {
+        t = { true, true, true, true };
+    } else if (is("claude-haiku-5-5")) {
+        t = { true, true, false, true };  // no server-side fallback for Haiku
+    } else if (is("claude-fable-5") || is("claude-opus-5") || is("claude-sonnet-5")) {
+        t = { true, true, is("claude-sonnet-5") ? false : true, false };
+    } else if (is("claude-opus-4-8") || is("claude-opus-4-7")) {
+        t = { true, true, false, false };
+    } else if (is("claude-opus-4-6") || is("claude-sonnet-4-6")) {
+        t = { true, false, false, false };
+    }
+    return t;
+}
+
+} // namespace
 
 AiService::AiService(EditManager* editMgr, AudioEngine* audioEngine,
                      PluginScanner* pluginScanner, QObject* parent)
@@ -68,6 +101,56 @@ void AiService::setPreviewMixPlanMode(bool enabled)
     s.setValue("ai/previewMixPlanMode", enabled);
 }
 
+QString AiService::effort()
+{
+    return QSettings().value("ai/effort", "high").toString();
+}
+
+void AiService::setEffort(const QString& effort)
+{
+    QSettings().setValue("ai/effort", effort);
+}
+
+// Adds the per-model options: effort, the default server-side fallback for
+// refusals, and preserved-thinking handling. The beta headers they need are
+// combined into one anthropic-beta header.
+void AiService::applyModelOptions(QJsonObject& body, QNetworkRequest& request,
+                                  const QString& effortLevel, bool allowFallback) const
+{
+    const auto traits = traitsFor(body["model"].toString());
+    QStringList betas;
+
+    if (traits.effort) {
+        QString level = effortLevel;
+        if (level == "xhigh" && !traits.xhighEffort)
+            level = "high";
+        QJsonObject outputConfig;
+        outputConfig["effort"] = level;
+        body["output_config"] = outputConfig;
+    }
+
+    if (traits.fallbackDefault && allowFallback) {
+        body["fallbacks"] = "default";
+        betas << "server-side-fallback-2026-07-01";
+    }
+
+    // The history is append-only, so replayed thinking blocks should always
+    // match; drop_block keeps an unexpected mismatch (e.g. a chat saved by an
+    // older version) from failing the request.
+    if (traits.preservedThinking) {
+        QJsonObject binding;
+        binding["prefix_mismatch_behavior"] = "drop_block";
+        QJsonObject thinking;
+        thinking["type"] = "adaptive";
+        thinking["block_binding"] = binding;
+        body["thinking"] = thinking;
+        betas << "thinking-binding-controls-2026-08-01";
+    }
+
+    if (!betas.isEmpty())
+        request.setRawHeader("anthropic-beta", betas.join(',').toUtf8());
+}
+
 void AiService::setBusy(bool b)
 {
     if (busy_ != b) {
@@ -84,6 +167,27 @@ QString AiService::buildSystemPrompt() const
         "You are an AI assistant integrated into OpenDaw, a digital audio workstation. "
         "You help users manage their music projects by manipulating tracks, effects, "
         "routing, and transport controls.\n\n";
+
+    prompt += "Rules:\n"
+              "- Use the provided tools to manipulate the DAW. Call tools as needed.\n"
+              "- For bulk operations, call multiple tools in sequence.\n"
+              "- The latest project state arrives in a <project_state> block on the most recent "
+              "user turn, and again after each round of tool results. It is a LIVE snapshot that "
+              "includes your own changes. "
+              "If you just created tracks or clips, they will appear in the snapshot — do NOT treat "
+              "them as pre-existing or comment on them as if seeing them for the first time. "
+              "Only reference things the USER mentioned or that existed BEFORE your first action.\n";
+    return prompt + kSystemPromptRules + (previewMixPlanMode()
+        ? QString("- Preview mode is ON: call preview_mix_plan before mutating tools and wait for user confirmation intent.\n")
+        : QString());
+}
+
+// The live project state, sent as a hidden text block. It is appended to the
+// conversation (never edited in place) so earlier turns stay byte-identical,
+// which preserved thinking and prompt caching both rely on.
+AiContentBlock AiService::buildProjectSnapshot() const
+{
+    QString prompt = "<project_state>\n";
 
     if (editMgr_ && editMgr_->edit()) {
         prompt += "Current project state (live snapshot — includes any changes you have already made in this conversation):\n";
@@ -111,15 +215,18 @@ QString AiService::buildSystemPrompt() const
                                t->isMuted(false) ? " MUTED" : "",
                                t->isSolo(false) ? " SOLO" : "");
         }
+    } else {
+        prompt += "No project is open.\n";
     }
+    prompt += "</project_state>";
 
-    prompt += "\nRules:\n"
-              "- Use the provided tools to manipulate the DAW. Call tools as needed.\n"
-              "- For bulk operations, call multiple tools in sequence.\n"
-              "- The project state shown above is a LIVE snapshot that updates after each tool call. "
-              "If you just created tracks or clips, they will appear in the snapshot — do NOT treat "
-              "them as pre-existing or comment on them as if seeing them for the first time. "
-              "Only reference things the USER mentioned or that existed BEFORE your first action.\n"
+    AiContentBlock block;
+    block.type = "context";
+    block.text = prompt;
+    return block;
+}
+
+const char* const AiService::kSystemPromptRules =
               "- After completing actions, briefly confirm what you did.\n"
               "- You can create MIDI clips and write notes into them. Use create_midi_clip to make a clip, "
               "then add_midi_notes to populate it. Note positions are in beats relative to clip start. "
@@ -153,13 +260,6 @@ QString AiService::buildSystemPrompt() const
               "- Double-check every note number against the key before submitting. If in doubt, stay diatonic.\n"
               "- When writing drums (channel 10 / GM percussion), key constraints do not apply.\n";
 
-    if (previewMixPlanMode()) {
-        prompt += "- Preview mode is ON: call preview_mix_plan before mutating tools and wait for user confirmation intent.\n";
-    }
-
-    return prompt;
-}
-
 // ── Conversation ────────────────────────────────────────────────────────────
 
 void AiService::clearConversation()
@@ -188,7 +288,7 @@ void AiService::requestSessionTitle(const QString& userMessage)
 
     QJsonObject body;
     body["model"] = model();
-    body["max_tokens"] = 30;
+    body["max_tokens"] = 1024;
     body["system"] = QString("Generate a concise 3-6 word title for this chat. "
                              "Reply with ONLY the title, no quotes or punctuation.");
     QJsonArray messages;
@@ -208,7 +308,8 @@ void AiService::requestSessionTitle(const QString& userMessage)
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setRawHeader("x-api-key", key.toUtf8());
     request.setRawHeader("anthropic-version", "2023-06-01");
-    request.setTransferTimeout(15000);
+    request.setTransferTimeout(30000);
+    applyModelOptions(body, request, "low", false);
 
     auto* reply = nam_->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
@@ -218,10 +319,14 @@ void AiService::requestSessionTitle(const QString& userMessage)
         auto doc = QJsonDocument::fromJson(reply->readAll());
         if (doc.isNull()) return;
         auto obj = doc.object();
-        auto contentArr = obj["content"].toArray();
-        if (contentArr.isEmpty()) return;
-
-        QString title = contentArr[0].toObject()["text"].toString().trimmed();
+        // Responses can start with thinking blocks; take the first text block.
+        QString title;
+        for (const auto& val : obj["content"].toArray()) {
+            if (val.toObject()["type"].toString() == "text") {
+                title = val.toObject()["text"].toString().trimmed();
+                break;
+            }
+        }
         if (title.isEmpty()) return;
 
         if (title.length() > 60)
@@ -231,24 +336,18 @@ void AiService::requestSessionTitle(const QString& userMessage)
     });
 }
 
-void AiService::pruneHistory()
-{
-    if (conversationHistory_.size() <= 50) return;
-    while (conversationHistory_.size() > 40)
-        conversationHistory_.removeFirst();
-}
-
 void AiService::sendMessage(const QString& userText)
 {
     if (busy_) return;
 
     QString key = apiKey();
     if (key.isEmpty()) {
-        emit errorOccurred("No API key set. Open AI settings to configure your Anthropic API key.");
+        emit errorOccurred("No API key set. Open Settings > AI Assistant to add your Anthropic API key.");
         return;
     }
 
     AiMessage userMsg = AiMessage::userMessage(userText);
+    userMsg.content.prepend(buildProjectSnapshot());
     conversationHistory_.append(userMsg);
     toolRoundCount_ = 0;
 
@@ -265,9 +364,16 @@ QJsonObject AiService::messageToJson(const AiMessage& msg) const
     QJsonArray contentArr;
     for (auto& block : msg.content) {
         QJsonObject blockObj;
-        if (block.type == "text") {
+        if (block.type == "text" || block.type == "context") {
             blockObj["type"] = "text";
             blockObj["text"] = block.text;
+        } else if (block.type == "thinking") {
+            blockObj["type"] = "thinking";
+            blockObj["thinking"] = block.thinking;
+            blockObj["signature"] = block.signature;
+        } else if (block.type == "redacted_thinking") {
+            blockObj["type"] = "redacted_thinking";
+            blockObj["data"] = block.data;
         } else if (block.type == "tool_use") {
             blockObj["type"] = "tool_use";
             blockObj["id"] = block.toolCall.id;
@@ -279,6 +385,8 @@ QJsonObject AiService::messageToJson(const AiMessage& msg) const
             blockObj["content"] = block.toolResult.content;
             if (block.toolResult.isError)
                 blockObj["is_error"] = true;
+        } else {
+            continue;  // e.g. "fallback": an audit marker, not sent back
         }
         contentArr.append(blockObj);
     }
@@ -295,6 +403,8 @@ void AiService::sendToApi()
     currentToolInputStr_.clear();
     inToolInput_ = false;
     currentBlockIndex_ = -1;
+    currentStopReason_.clear();
+    currentRefusalCategory_.clear();
 
     QJsonObject body;
     body["model"] = model();
@@ -313,10 +423,9 @@ void AiService::sendToApi()
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setRawHeader("x-api-key", apiKey().toUtf8());
     request.setRawHeader("anthropic-version", "2023-06-01");
+    applyModelOptions(body, request, effort(), true);
 
     request.setTransferTimeout(60000);
-
-    pruneHistory();
 
     QByteArray bodyData = QJsonDocument(body).toJson(QJsonDocument::Compact);
     currentReply_ = nam_->post(request, bodyData);
@@ -362,7 +471,12 @@ void AiService::handleStreamChunk()
             AiContentBlock block;
             block.type = blockType;
 
-            if (blockType == "tool_use") {
+            if (blockType == "thinking") {
+                block.thinking = blockObj["thinking"].toString();
+                block.signature = blockObj["signature"].toString();
+            } else if (blockType == "redacted_thinking") {
+                block.data = blockObj["data"].toString();
+            } else if (blockType == "tool_use") {
                 block.toolCall.id = blockObj["id"].toString();
                 block.toolCall.name = blockObj["name"].toString();
                 inToolInput_ = true;
@@ -386,6 +500,21 @@ void AiService::handleStreamChunk()
             else if (deltaType == "input_json_delta") {
                 currentToolInputStr_ += delta["partial_json"].toString();
             }
+            else if (currentBlockIndex_ >= 0 && currentBlockIndex_ < currentContentBlocks_.size()) {
+                auto& block = currentContentBlocks_[currentBlockIndex_];
+                if (deltaType == "thinking_delta")
+                    block.thinking += delta["thinking"].toString();
+                else if (deltaType == "signature_delta")
+                    block.signature = delta["signature"].toString();
+            }
+        }
+        else if (type == "message_delta") {
+            auto delta = obj["delta"].toObject();
+            if (delta.contains("stop_reason"))
+                currentStopReason_ = delta["stop_reason"].toString();
+            auto details = delta["stop_details"].toObject();
+            if (!details.isEmpty())
+                currentRefusalCategory_ = details["category"].toString();
         }
         else if (type == "content_block_stop") {
             if (inToolInput_ && currentBlockIndex_ >= 0
@@ -444,10 +573,38 @@ void AiService::handleStreamFinished()
 
 void AiService::processAssistantResponse()
 {
+    // A refusal (from the whole fallback chain) leaves no usable answer:
+    // discard any partial output instead of treating it as complete.
+    if (currentStopReason_ == "refusal") {
+        QString msg = "Claude declined this request.";
+        if (!currentRefusalCategory_.isEmpty())
+            msg += QString(" (category: %1)").arg(currentRefusalCategory_);
+        emit errorOccurred(msg);
+        setBusy(false);
+        return;
+    }
+
+    // After a mid-output fallback, the declined model's thinking and tool
+    // calls before the last switch point must not be run or sent back.
+    QVector<AiContentBlock> content = currentContentBlocks_;
+    int lastFallback = -1;
+    for (int i = 0; i < content.size(); ++i)
+        if (content[i].type == "fallback") lastFallback = i;
+    if (lastFallback >= 0) {
+        QVector<AiContentBlock> kept;
+        for (int i = 0; i < content.size(); ++i) {
+            const auto& t = content[i].type;
+            if (i < lastFallback && (t == "thinking" || t == "redacted_thinking" || t == "tool_use"))
+                continue;
+            kept.append(content[i]);
+        }
+        content = kept;
+    }
+
     AiMessage assistantMsg;
     assistantMsg.role = AiRole::Assistant;
     assistantMsg.timestamp = QDateTime::currentDateTime();
-    assistantMsg.content = currentContentBlocks_;
+    assistantMsg.content = content;
 
     conversationHistory_.append(assistantMsg);
 
@@ -561,6 +718,7 @@ void AiService::continueAfterToolResults(const QVector<AiToolResult>& results,
         block.toolResult = result;
         toolResultMsg.content.append(block);
     }
+    toolResultMsg.content.append(buildProjectSnapshot());
 
     conversationHistory_.append(toolResultMsg);
 
