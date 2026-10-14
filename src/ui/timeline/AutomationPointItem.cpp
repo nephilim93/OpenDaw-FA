@@ -84,8 +84,9 @@ void AutomationPointItem::hoverLeaveEvent(QGraphicsSceneHoverEvent*)
 
 void AutomationPointItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
 {
-    // With Pen the lane underneath draws over points; let the press through.
-    if (EditToolState::instance().tool() == EditTool::Pen) {
+    // With Pen or Eraser the lane underneath handles points; let the press through.
+    const auto tool = EditToolState::instance().tool();
+    if (tool == EditTool::Pen || tool == EditTool::Eraser) {
         event->ignore();
         return;
     }

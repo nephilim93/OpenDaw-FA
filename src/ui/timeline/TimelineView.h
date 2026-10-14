@@ -128,6 +128,7 @@ private:
     // Editing tools (Eraser / Split / Glue / Pen, see EditToolState)
     bool handleToolMouseEvent(QEvent* event);
     ClipItem* clipItemAt(const QPointF& scenePos) const;
+    AutomationLaneItem* automationLaneAt(const QPointF& scenePos) const;
     void createMidiClipAt(double sceneX, double sceneY, bool openEditor);
     void deleteClips(std::vector<te::Clip*> clips);
     bool splitClips(const std::vector<te::Clip*>& clips, tracktion::TimePosition time);
