@@ -1,4 +1,5 @@
 #include "ClipItem.h"
+#include "ui/tools/EditToolState.h"
 #include "GridSnapper.h"
 #include "engine/EditManager.h"
 #include "utils/ThemeManager.h"
@@ -866,6 +867,15 @@ void ClipItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
 
 void ClipItem::hoverMoveEvent(QGraphicsSceneHoverEvent* event)
 {
+    // Eraser / Split / Glue are handled by the timeline; show their cursor
+    // instead of the move and resize cursors.
+    switch (EditToolState::instance().tool()) {
+    case EditTool::Eraser: setCursor(QCursor(Qt::PointingHandCursor)); return;
+    case EditTool::Split:  setCursor(QCursor(Qt::SplitHCursor));       return;
+    case EditTool::Glue:   setCursor(QCursor(Qt::PointingHandCursor)); return;
+    default: break;
+    }
+
     if (isNearFadeInHandle(event->pos()) || isNearFadeOutHandle(event->pos()))
         setCursor(QCursor(Qt::SizeHorCursor));
     else if (isNearRightEdge(event->pos()))

@@ -124,6 +124,18 @@ private:
     void syncHeaderScroll();
     void handleFileDrop(const QString& path, double beat, int trackIndex);
     void handleEmptyAreaDoubleClick(double sceneX, double sceneY);
+
+    // Editing tools (Eraser / Split / Glue / Pen, see EditToolState)
+    bool handleToolMouseEvent(QEvent* event);
+    ClipItem* clipItemAt(const QPointF& scenePos) const;
+    void createMidiClipAt(double sceneX, double sceneY, bool openEditor);
+    void deleteClips(std::vector<te::Clip*> clips);
+    bool splitClips(const std::vector<te::Clip*>& clips, tracktion::TimePosition time);
+    bool splitTargetAt(const QPointF& scenePos, ClipItem*& item, double& splitBeat) const;
+    void updateSplitIndicator(const QPointF& scenePos);
+    void hideSplitIndicator();
+    void glueClipAt(const QPointF& scenePos);
+    bool glueClipPair(te::Clip* first, te::Clip* second, QString& error);
     void handleBackgroundDragStarted(QPointF startScenePos);
     void handleBackgroundDragUpdated(QPointF startScenePos, QPointF currentScenePos);
     void handleBackgroundDragFinished(QPointF startScenePos, QPointF endScenePos);
@@ -165,6 +177,8 @@ private:
     std::vector<TrackHeaderWidget*> trackHeaders_;
     std::vector<FolderHeaderWidget*> folderHeaders_;
     QGraphicsRectItem* midiClipDrawPreviewItem_ = nullptr;
+    QGraphicsLineItem* splitIndicator_ = nullptr;
+    bool isErasing_ = false;
     te::AudioTrack* midiClipDrawTrack_ = nullptr;
     double midiClipDrawStartBeat_ = 0.0;
     bool isMidiClipDrawActive_ = false;

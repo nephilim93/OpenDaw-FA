@@ -4,6 +4,7 @@
 #include "AutomationPointItem.h"
 #include "utils/ThemeManager.h"
 #include "utils/IconFont.h"
+#include "ui/tools/EditToolState.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <QPushButton>
 #include <QGraphicsSceneDragDropEvent>
@@ -443,8 +444,10 @@ TimelineView::TimelineView(EditManager* editMgr, QWidget* parent)
 
     // Click on timeline blank area -> clear track selection
     connect(scene_, &TimelineScene::backgroundClicked,
-            this, [this](double, double) {
+            this, [this](double sceneX, double sceneY) {
                 selectTrack(nullptr);
+                if (EditToolState::instance().tool() == EditTool::Pen)
+                    createMidiClipAt(sceneX, sceneY, false);
             });
 
     connect(scene_, &TimelineScene::backgroundDragStarted,
@@ -454,6 +457,12 @@ TimelineView::TimelineView(EditManager* editMgr, QWidget* parent)
     connect(scene_, &TimelineScene::backgroundDragFinished,
             this, &TimelineView::handleBackgroundDragFinished);
     qDebug() << "[TimelineView] ctor: scene connections done";
+
+    connect(&EditToolState::instance(), &EditToolState::toolChanged,
+            this, [this]() {
+                hideSplitIndicator();
+                isErasing_ = false;
+            });
 
     // Double-click on empty area -> create blank MIDI clip on MIDI tracks
     connect(scene_, &TimelineScene::emptyAreaDoubleClicked,
@@ -637,6 +646,9 @@ void TimelineView::zoomVerticalOut() { setTrackHeight(trackHeight_ / 1.2); }
 
 bool TimelineView::eventFilter(QObject* watched, QEvent* event)
 {
+    if (watched == graphicsView_->viewport() && handleToolMouseEvent(event))
+        return true;
+
     if (watched == graphicsView_ || watched == graphicsView_->viewport()) {
         if (event->type() == QEvent::MouseButtonPress) {
             graphicsView_->setFocus(Qt::MouseFocusReason);
@@ -1921,21 +1933,26 @@ void TimelineView::splitSelectedClipsAtPlayhead()
     if (!editMgr_ || !editMgr_->edit())
         return;
 
-    const auto playheadTime = editMgr_->transport().getPosition();
-    bool didSplitAny = false;
+    std::vector<te::Clip*> selected;
+    for (auto* item : clipItems_)
+        if (item && item->isSelected() && item->clip())
+            selected.push_back(item->clip());
 
+    if (splitClips(selected, editMgr_->transport().getPosition()))
+        rebuildClips();
+}
+
+// Splits each clip (and any MIDI clips linked to it on other channels) at
+// `time`. Clips that `time` does not fall inside are left alone.
+bool TimelineView::splitClips(const std::vector<te::Clip*>& clips,
+                              tracktion::TimePosition time)
+{
+    bool didSplitAny = false;
     std::vector<te::MidiClip*> linkedToSplit;
 
-    for (auto* item : clipItems_) {
-        if (!item || !item->isSelected())
-            continue;
-
-        auto* clip = item->clip();
-        if (!clip)
-            continue;
-
+    for (auto* clip : clips) {
         const auto clipRange = clip->getPosition().time;
-        if (playheadTime <= clipRange.getStart() || playheadTime >= clipRange.getEnd())
+        if (time <= clipRange.getStart() || time >= clipRange.getEnd())
             continue;
 
         if (auto* mc = dynamic_cast<te::MidiClip*>(clip)) {
@@ -1950,19 +1967,18 @@ void TimelineView::splitSelectedClipsAtPlayhead()
         }
 
         if (auto* clipTrack = dynamic_cast<te::ClipTrack*>(clip->getClipTrack())) {
-            if (clipTrack->splitClip(*clip, playheadTime) != nullptr)
+            if (clipTrack->splitClip(*clip, time) != nullptr)
                 didSplitAny = true;
         }
     }
 
     for (auto* lc : linkedToSplit) {
         if (auto* clipTrack = dynamic_cast<te::ClipTrack*>(lc->getClipTrack())) {
-            clipTrack->splitClip(*lc, playheadTime);
+            clipTrack->splitClip(*lc, time);
         }
     }
 
-    if (didSplitAny)
-        rebuildClips();
+    return didSplitAny;
 }
 
 void TimelineView::deleteSelectedClips()
@@ -1975,6 +1991,12 @@ void TimelineView::deleteSelectedClips()
             toDelete.push_back(item->clip());
     }
 
+    deleteClips(std::move(toDelete));
+}
+
+// Deletes the clips plus any MIDI clips linked to them on other channels.
+void TimelineView::deleteClips(std::vector<te::Clip*> toDelete)
+{
     if (toDelete.empty()) return;
 
     std::vector<te::Clip*> linkedToDelete;
@@ -1991,7 +2013,8 @@ void TimelineView::deleteSelectedClips()
         }
     }
     for (auto* lc : linkedToDelete)
-        toDelete.push_back(lc);
+        if (std::find(toDelete.begin(), toDelete.end(), lc) == toDelete.end())
+            toDelete.push_back(lc);
 
     for (auto* clip : toDelete)
         clip->removeFromParent();
@@ -2085,6 +2108,13 @@ void TimelineView::clearTrackSelection()
 
 void TimelineView::handleEmptyAreaDoubleClick(double sceneX, double sceneY)
 {
+    createMidiClipAt(sceneX, sceneY, true);
+}
+
+// Creates a one-bar MIDI clip at the bar containing the position, on MIDI
+// tracks only. Used by double-click and by a Pen tool click.
+void TimelineView::createMidiClipAt(double sceneX, double sceneY, bool openEditor)
+{
     if (!editMgr_ || !editMgr_->edit()) return;
 
     double beat = sceneX / pixelsPerBeat_;
@@ -2107,8 +2137,320 @@ void TimelineView::handleEmptyAreaDoubleClick(double sceneX, double sceneY)
 
     if (clip) {
         selectClipItem(clip);
-        emit editMgr_->midiClipDoubleClicked(clip);
+        if (openEditor)
+            emit editMgr_->midiClipDoubleClicked(clip);
     }
+}
+
+// ── Editing tools ───────────────────────────────────────────────────────────
+
+ClipItem* TimelineView::clipItemAt(const QPointF& scenePos) const
+{
+    for (auto* item : scene_->items(scenePos)) {
+        for (auto* it = item; it; it = it->parentItem())
+            if (auto* clipItem = dynamic_cast<ClipItem*>(it))
+                return clipItem;
+    }
+    return nullptr;
+}
+
+// Handles viewport mouse events for the Eraser, Split and Glue tools before
+// they reach the clips. Returns true if the event was consumed. Pointer and
+// Pen fall through to the normal clip and background handling.
+bool TimelineView::handleToolMouseEvent(QEvent* event)
+{
+    const auto type = event->type();
+    if (type != QEvent::MouseButtonPress && type != QEvent::MouseButtonDblClick
+        && type != QEvent::MouseMove && type != QEvent::MouseButtonRelease)
+        return false;
+    if (!editMgr_ || !editMgr_->edit())
+        return false;
+
+    const auto tool = EditToolState::instance().tool();
+    if (tool != EditTool::Eraser && tool != EditTool::Split && tool != EditTool::Glue)
+        return false;
+
+    auto* mouseEvent = static_cast<QMouseEvent*>(event);
+    const QPointF scenePos = graphicsView_->mapToScene(mouseEvent->pos());
+
+    if (type == QEvent::MouseMove) {
+        if (tool == EditTool::Split)
+            updateSplitIndicator(scenePos);
+        if (tool == EditTool::Eraser && isErasing_) {
+            if (auto* item = clipItemAt(scenePos))
+                deleteClips({ item->clip() });
+        }
+        return isErasing_;
+    }
+
+    if (type == QEvent::MouseButtonRelease) {
+        if (mouseEvent->button() == Qt::LeftButton && isErasing_) {
+            isErasing_ = false;
+            return true;
+        }
+        return false;
+    }
+
+    // Press / double-click
+    if (mouseEvent->button() != Qt::LeftButton)
+        return false;
+    graphicsView_->setFocus(Qt::MouseFocusReason);
+
+    auto* item = clipItemAt(scenePos);
+    if (tool == EditTool::Eraser) {
+        isErasing_ = true;
+        editMgr_->edit()->getUndoManager().beginNewTransaction("Erase Clips");
+        if (item) deleteClips({ item->clip() });
+        return true;
+    }
+    if (!item)
+        return false;  // empty space keeps its normal behaviour
+
+    // The second click of a double-click arrives as its own event; act only
+    // once so a quick double-click does not split or glue twice.
+    if (type == QEvent::MouseButtonDblClick)
+        return true;
+
+    if (tool == EditTool::Split) {
+        ClipItem* target = nullptr;
+        double splitBeat = 0.0;
+        if (splitTargetAt(scenePos, target, splitBeat)) {
+            auto& ts = editMgr_->edit()->tempoSequence;
+            editMgr_->edit()->getUndoManager().beginNewTransaction("Split Clip");
+            if (splitClips({ target->clip() },
+                           ts.toTime(tracktion::BeatPosition::fromBeats(splitBeat))))
+                rebuildClips();
+        }
+        updateSplitIndicator(scenePos);
+        return true;
+    }
+
+    glueClipAt(scenePos);
+    return true;
+}
+
+// Finds the clip under scenePos and the snapped beat a split would land on.
+// Shared by the hover indicator and the split itself.
+bool TimelineView::splitTargetAt(const QPointF& scenePos, ClipItem*& item,
+                                 double& splitBeat) const
+{
+    item = clipItemAt(scenePos);
+    if (!item || !item->clip()) return false;
+
+    auto& ts = editMgr_->edit()->tempoSequence;
+    const auto pos = item->clip()->getPosition();
+    const double startBeat = ts.toBeats(pos.getStart()).inBeats();
+    const double endBeat = ts.toBeats(pos.getEnd()).inBeats();
+
+    const double mouseBeat = scenePos.x() / pixelsPerBeat_;
+    splitBeat = snapper_.snapBeat(mouseBeat);
+
+    // Clips no longer than one grid step have no grid line inside them, so
+    // split those at the exact mouse position instead.
+    const double grid = snapper_.gridIntervalBeats();
+    if (grid <= 0.0 || endBeat - startBeat <= grid)
+        splitBeat = mouseBeat;
+
+    constexpr double minPart = 1.0 / 64.0;
+    return splitBeat >= startBeat + minPart && splitBeat <= endBeat - minPart;
+}
+
+void TimelineView::updateSplitIndicator(const QPointF& scenePos)
+{
+    ClipItem* item = nullptr;
+    double splitBeat = 0.0;
+    if (!splitTargetAt(scenePos, item, splitBeat)) {
+        hideSplitIndicator();
+        return;
+    }
+
+    if (!splitIndicator_) {
+        QPen pen(ThemeManager::instance().current().accent, 2);
+        pen.setCosmetic(true);
+        splitIndicator_ = scene_->addLine(QLineF(), pen);
+        splitIndicator_->setZValue(10);
+    }
+
+    const QRectF r = item->sceneBoundingRect();
+    const double x = splitBeat * pixelsPerBeat_;
+    splitIndicator_->setLine(x, r.top(), x, r.bottom());
+    splitIndicator_->show();
+}
+
+void TimelineView::hideSplitIndicator()
+{
+    if (splitIndicator_)
+        splitIndicator_->hide();
+}
+
+static bool sameMidiChannel(te::Clip* a, te::Clip* b)
+{
+    auto* ma = dynamic_cast<te::MidiClip*>(a);
+    auto* mb = dynamic_cast<te::MidiClip*>(b);
+    return ma && mb && ma->getMidiChannel() == mb->getMidiChannel();
+}
+
+// Glues the clicked clip with the next clip on its track (of the same kind,
+// and for MIDI the same channel). If the clicked clip is part of a larger
+// selection, the selected clips on that track are glued in order instead.
+void TimelineView::glueClipAt(const QPointF& scenePos)
+{
+    auto* item = clipItemAt(scenePos);
+    if (!item || !item->clip()) return;
+
+    auto* clicked = item->clip();
+    auto* track = clicked->getClipTrack();
+    if (!track) return;
+
+    // A MIDI merge deletes the clips it joins (including `clicked`), so keep
+    // the channel by value rather than comparing against `clicked` later.
+    auto* clickedMidi = dynamic_cast<te::MidiClip*>(clicked);
+    const bool isMidi = clickedMidi != nullptr;
+    const auto channel = isMidi ? clickedMidi->getMidiChannel() : te::MidiChannel();
+    auto onChannel = [channel](te::Clip* c) {
+        auto* mc = dynamic_cast<te::MidiClip*>(c);
+        return mc && mc->getMidiChannel() == channel;
+    };
+    auto sameKind = [&](te::Clip* c) {
+        return isMidi ? onChannel(c) : dynamic_cast<te::WaveAudioClip*>(c) != nullptr;
+    };
+
+    std::vector<te::Clip*> chain;
+    int selectedCount = 0;
+    for (auto* ci : clipItems_)
+        if (ci->isSelected()) ++selectedCount;
+
+    if (item->isSelected() && selectedCount > 1) {
+        for (auto* ci : clipItems_) {
+            auto* c = ci->clip();
+            if (ci->isSelected() && c && c->getClipTrack() == track && sameKind(c))
+                chain.push_back(c);
+        }
+    } else {
+        const auto clickedEnd = clicked->getPosition().getEnd();
+        te::Clip* next = nullptr;
+        for (auto* c : track->getClips()) {
+            if (c == clicked || !sameKind(c)) continue;
+            if (c->getPosition().getStart() < clickedEnd - tracktion::TimeDuration::fromSeconds(0.001))
+                continue;
+            if (!next || c->getPosition().getStart() < next->getPosition().getStart())
+                next = c;
+        }
+        if (!next) return;
+        chain = { clicked, next };
+    }
+
+    if (chain.size() < 2) return;
+    std::sort(chain.begin(), chain.end(), [](te::Clip* a, te::Clip* b) {
+        return a->getPosition().getStart() < b->getPosition().getStart();
+    });
+
+    editMgr_->edit()->getUndoManager().beginNewTransaction("Glue Clips");
+
+    QString error;
+    bool changed = false;
+    if (isMidi) {
+        // A MIDI merge replaces both clips with a new one, so after each step
+        // continue from the merged clip, found again by its start time.
+        auto current = chain.front();
+        for (size_t i = 1; i < chain.size(); ++i) {
+            const auto start = current->getPosition().getStart();
+            if (!glueClipPair(current, chain[i], error)) break;
+            changed = true;
+
+            current = nullptr;
+            for (auto* c : track->getClips())
+                if (onChannel(c) && c->getPosition().getStart() == start)
+                    current = c;
+            if (!current) break;
+        }
+    } else {
+        // Audio pieces are extended in place, so the first clip survives.
+        auto* first = chain.front();
+        for (size_t i = 1; i < chain.size(); ++i) {
+            if (!glueClipPair(first, chain[i], error)) break;
+            changed = true;
+        }
+    }
+
+    if (changed)
+        rebuildClips();
+    if (!error.isEmpty())
+        QMessageBox::information(this, "Glue Clips", error);
+}
+
+bool TimelineView::glueClipPair(te::Clip* first, te::Clip* second, QString& error)
+{
+    if (auto* m1 = dynamic_cast<te::MidiClip*>(first)) {
+        auto* m2 = dynamic_cast<te::MidiClip*>(second);
+        if (!m2) return false;
+
+        // Carry linked clips on other channels along, so multi-channel clips
+        // stay together: each channel's pair is merged separately.
+        auto* track = m1->getAudioTrack();
+        auto linked1 = editMgr_->getLinkedMidiClips(track, m1);
+        auto linked2 = editMgr_->getLinkedMidiClips(track, m2);
+
+        // Pair everything up before merging: each merge deletes its clips,
+        // so nothing may be inspected once merging has started.
+        std::vector<std::pair<te::MidiClip*, te::MidiClip*>> pairs;
+        for (auto* a : linked1) {
+            if (std::find(linked2.begin(), linked2.end(), a) != linked2.end())
+                continue;  // already spans both
+            for (auto* b : linked2) {
+                if (sameMidiChannel(a, b)) {
+                    pairs.push_back({ a, b });
+                    break;
+                }
+            }
+        }
+
+        bool ok = true;
+        for (auto& [a, b] : pairs) {
+            auto result = te::mergeMidiClips({ a, b });
+            if (result.failed()) {
+                error = QString::fromUtf8(result.getErrorMessage().toRawUTF8());
+                ok = false;
+            }
+        }
+        return ok;
+    }
+
+    auto* a = dynamic_cast<te::WaveAudioClip*>(first);
+    auto* b = dynamic_cast<te::WaveAudioClip*>(second);
+    if (!a || !b) return false;
+
+    const auto pa = a->getPosition();
+    const auto pb = b->getPosition();
+    constexpr double tolerance = 0.001;
+
+    // Only consecutive pieces of one recording can be joined without
+    // re-rendering: same file and settings, touching, and lined up so the
+    // second continues exactly where the first stops in the source audio.
+    const bool rejoinable =
+        a->getOriginalFile() == b->getOriginalFile()
+        && !a->isLooping() && !b->isLooping()
+        && !a->getIsReversed() && !b->getIsReversed()
+        && a->getSpeedRatio() == b->getSpeedRatio()
+        && a->getAutoTempo() == b->getAutoTempo()
+        && a->getPitchChange() == b->getPitchChange()
+        && a->getGainDB() == b->getGainDB()
+        && std::abs((pb.getStart() - pa.getEnd()).inSeconds()) < tolerance
+        && std::abs((pb.getStartOfSource() - pa.getStartOfSource()).inSeconds()) < tolerance;
+
+    if (!rejoinable) {
+        error = "Only consecutive pieces of the same audio recording (for example, "
+                "the two halves of a split) can be glued. These clips come from "
+                "different audio or have different clip settings.";
+        return false;
+    }
+
+    const auto fadeOut = b->getFadeOut();
+    const auto end = pb.getEnd();
+    b->removeFromParent();
+    a->setEnd(end, false);
+    a->setFadeOut(fadeOut);
+    return true;
 }
 
 void TimelineView::handleBackgroundDragStarted(QPointF startScenePos)
