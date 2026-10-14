@@ -32,7 +32,7 @@ First build takes 2-4 minutes (compiling JUCE/Tracktion). Incremental rebuilds t
 
 ### Framework Bridge
 
-Two frameworks coexist via `JuceQtBridge` (`src/app/JuceQtBridge.h`): a `QTimer` fires every 10ms to pump JUCE's `MessageManager` from inside Qt's event loop. JUCE's audio processing runs on its own real-time thread, independent of both GUI event loops. This pump must be running before any Tracktion Engine calls.
+Two frameworks coexist on one thread via `JuceQtBridge` (`src/app/JuceQtBridge.h`). On macOS and Windows, JUCE posts messages to the native event queue that Qt already dispatches, so no pump runs. On Linux a `QTimer` dispatches pending JUCE messages every 10ms without blocking. Never call `runDispatchLoopUntil` with a non-zero duration: it stalls the Qt thread. JUCE's audio processing runs on its own real-time thread, independent of the GUI event loop.
 
 ### Ownership Chain
 
