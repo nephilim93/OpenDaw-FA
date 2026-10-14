@@ -1153,6 +1153,8 @@ void AiToolExecutor::registerHandlers()
         if (notes.isEmpty()) return err(id, "No notes provided.");
 
         auto& seq = midiClip->getSequence();
+        auto* um = &editMgr_->edit()->getUndoManager();
+        um->beginNewTransaction("AI: Add MIDI Notes");
         int added = 0;
 
         for (const auto& noteVal : notes) {
@@ -1171,7 +1173,7 @@ void AiToolExecutor::registerHandlers()
             seq.addNote(noteNum,
                         tracktion::BeatPosition::fromBeats(startBeat),
                         tracktion::BeatDuration::fromBeats(lenBeats),
-                        velocity, channel - 1, nullptr);
+                        velocity, channel - 1, um);
             added++;
         }
 
@@ -1232,7 +1234,9 @@ void AiToolExecutor::registerHandlers()
 
         auto& seq = midiClip->getSequence();
         int removed = seq.getNotes().size();
-        seq.removeAllNotes(nullptr);
+        auto* um = &editMgr_->edit()->getUndoManager();
+        um->beginNewTransaction("AI: Clear MIDI Notes");
+        seq.removeAllNotes(um);
 
         emitEditChanged();
         emitMidiClipModified(midiClip);
@@ -1376,8 +1380,10 @@ void AiToolExecutor::registerHandlers()
         }
 
         int removed = toRemove.size();
+        auto* um = &editMgr_->edit()->getUndoManager();
+        um->beginNewTransaction("AI: Remove MIDI Notes");
         for (auto* note : toRemove)
-            seq.removeNote(*note, nullptr);
+            seq.removeNote(*note, um);
 
         emitEditChanged();
         if (removed > 0)
