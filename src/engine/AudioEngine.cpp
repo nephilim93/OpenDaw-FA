@@ -3,9 +3,27 @@
 
 namespace OpenDaw {
 
+#if JUCE_LINUX
+namespace {
+// Tracktion opens the default device with every channel it reports before
+// setDefaultAudioDevice() narrows it to stereo. Through PipeWire's ALSA
+// plugin that is 128 capture channels, which crashes PipeWire's converter.
+// Skip the automatic open; setDefaultAudioDevice() opens the device instead.
+class OpenDawEngineBehaviour : public te::EngineBehaviour {
+public:
+    bool autoInitialiseDeviceManager() override { return false; }
+};
+}
+#endif
+
 AudioEngine::AudioEngine()
 {
+#if JUCE_LINUX
+    engine_ = std::make_unique<te::Engine>("OpenDaw", nullptr,
+                                           std::make_unique<OpenDawEngineBehaviour>());
+#else
     engine_ = std::make_unique<te::Engine>("OpenDaw");
+#endif
 }
 
 AudioEngine::~AudioEngine() = default;
