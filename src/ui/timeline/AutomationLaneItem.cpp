@@ -2,6 +2,7 @@
 #include "AutomationPointItem.h"
 #include "GridSnapper.h"
 #include "utils/ThemeManager.h"
+#include "ui/tools/EditToolState.h"
 #include <QPainter>
 #include <QGraphicsScene>
 #include <QGraphicsSceneMouseEvent>
@@ -509,7 +510,16 @@ void AutomationLaneItem::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event)
     freehandDrawing_ = false;
     freehandPath_.clear();
 
-    QPointF local = event->pos();
+    // With Pen the first click of the double-click already added the point.
+    if (EditToolState::instance().tool() != EditTool::Pen)
+        addPointAt(event->pos());
+    event->accept();
+}
+
+// Adds a point at the snapped beat under `local`. On the curve line the
+// interpolated value is kept, so the shape is preserved.
+void AutomationLaneItem::addPointAt(const QPointF& local)
+{
     float minVal = param_->getValueRange().getStart();
     float maxVal = param_->getValueRange().getEnd();
 
@@ -543,7 +553,6 @@ void AutomationLaneItem::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event)
     float curveVal = param_->isDiscrete() ? 1.0f : 0.0f;
     curve.addPoint(posForInsert, value, curveVal, um);
     rebuildFromCurve();
-    event->accept();
 }
 
 void AutomationLaneItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
@@ -555,6 +564,18 @@ void AutomationLaneItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
 
     QPointF local = event->pos();
     bool ctrlHeld = (event->modifiers() & Qt::ControlModifier);
+
+    // Pen draws anywhere, over the line and points too (a click adds a point,
+    // see mouseReleaseEvent).
+    if (EditToolState::instance().tool() == EditTool::Pen) {
+        clearPointSelection();
+        edit_->getUndoManager().beginNewTransaction("Draw Automation");
+        freehandDrawing_ = true;
+        freehandPath_.clear();
+        freehandPath_.append(local);
+        event->accept();
+        return;
+    }
 
     // Ctrl + click on lane background = rubber band selection
     if (ctrlHeld) {
@@ -587,11 +608,12 @@ void AutomationLaneItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
         }
     }
 
-    // Click on empty space = clear selection, start freehand draw
+    // Click on empty space = clear selection, start rubber band selection
+    // (drawing is the Pen tool's job)
     clearPointSelection();
-    freehandDrawing_ = true;
-    freehandPath_.clear();
-    freehandPath_.append(local);
+    rubberBanding_ = true;
+    rubberBandStart_ = local;
+    rubberBandRect_ = QRectF();
     event->accept();
 }
 
@@ -658,6 +680,15 @@ void AutomationLaneItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
     if (freehandDrawing_ && param_ && edit_) {
         freehandDrawing_ = false;
 
+        // A click without a real drag adds a single point.
+        const QRectF stroke = QPolygonF(freehandPath_).boundingRect();
+        if (stroke.width() < 3.0 && stroke.height() < 3.0) {
+            addPointAt(freehandPath_.first());
+            freehandPath_.clear();
+            event->accept();
+            return;
+        }
+
         if (freehandPath_.size() >= 2) {
             auto& curve = param_->getCurve();
             auto* um = &edit_->getUndoManager();
@@ -716,7 +747,9 @@ void AutomationLaneItem::hoverMoveEvent(QGraphicsSceneHoverEvent* event)
 
     QPointF local = event->pos();
 
-    if (!param_->isDiscrete() && EnvelopeUtils::hitTestCurve(curvePath_, local, 5.0)) {
+    if (EditToolState::instance().tool() == EditTool::Pen) {
+        setCursor(Qt::CrossCursor);
+    } else if (!param_->isDiscrete() && EnvelopeUtils::hitTestCurve(curvePath_, local, 5.0)) {
         setCursor(Qt::SizeVerCursor);
     } else {
         setCursor(Qt::CrossCursor);
