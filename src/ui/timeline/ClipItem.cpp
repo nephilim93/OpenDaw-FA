@@ -4,6 +4,7 @@
 #include "engine/EditManager.h"
 #include "utils/ThemeManager.h"
 #include "utils/WaveformCache.h"
+#include "music/Quantize.h"
 #include <QPainter>
 #include <QPainterPath>
 #include <QGraphicsSceneMouseEvent>
@@ -410,14 +411,16 @@ void ClipItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
                 if (auto* mc = dynamic_cast<te::MidiClip*>(clip_)) {
                     auto& seq = mc->getSequence();
                     auto* um = &clip_->edit.getUndoManager();
+                    um->beginNewTransaction("Quantize Notes");
+                    Quantize::Options options;  // 1/16, full strength
+                    options.lengths = true;
                     for (auto* note : seq.getNotes()) {
-                        double startBeat = note->getStartBeat().inBeats();
-                        double snapped = std::round(startBeat * 4.0) / 4.0;
-                        double len = note->getLengthBeats().inBeats();
-                        double snappedLen = std::max(0.25, std::round(len * 4.0) / 4.0);
+                        const auto after = Quantize::apply({ note->getNoteNumber(),
+                                                             note->getStartBeat().inBeats(),
+                                                             note->getLengthBeats().inBeats() }, options);
                         note->setStartAndLength(
-                            tracktion::BeatPosition::fromBeats(snapped),
-                            tracktion::BeatDuration::fromBeats(snappedLen), um);
+                            tracktion::BeatPosition::fromBeats(after.startBeat),
+                            tracktion::BeatDuration::fromBeats(after.lengthBeats), um);
                     }
                     if (requestRefresh_) requestRefresh_();
                 }

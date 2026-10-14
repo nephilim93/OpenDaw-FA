@@ -269,6 +269,8 @@ const char* const AiService::kSystemPromptRules =
               "Batch as many notes as possible into a single add_midi_notes call for efficiency. "
               "For arpeggios, broken chords, block-chord comping and other repeating chord-based "
               "parts, use generate_midi_pattern with the chord progression instead of listing notes. "
+              "To tighten timing, add swing or fix out-of-key notes in an existing clip, use "
+              "quantize_midi_notes. "
               "Middle C is MIDI note 60. A bar in 4/4 time is 4 beats.\n"
               "- When users ask about effects parameters, use get_track_effects to see "
               "current values before modifying them.\n"
