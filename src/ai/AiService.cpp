@@ -127,6 +127,11 @@ void AiService::setLocalApiKey(const QString& key) { QSettings().setValue("ai/lo
 bool AiService::localUseTools() { return QSettings().value("ai/localUseTools", true).toBool(); }
 void AiService::setLocalUseTools(bool enabled) { QSettings().setValue("ai/localUseTools", enabled); }
 
+// Off by default: with tools, local models tend to think for thousands of
+// tokens before each call (minutes per step on a consumer GPU).
+QString AiService::localReasoningEffort() { return QSettings().value("ai/localReasoningEffort", "none").toString(); }
+void AiService::setLocalReasoningEffort(const QString& effort) { QSettings().setValue("ai/localReasoningEffort", effort); }
+
 int AiService::recommendedLocalContext(bool withTools)
 {
     // About 4 characters per token, plus 4096 tokens for the system prompt
@@ -506,6 +511,9 @@ void AiService::sendToLocalServer()
     body["model"] = localModel();
     body["stream"] = true;
     body["max_tokens"] = kMaxLocalTokens;
+    // Servers without reasoning support ignore this field.
+    if (!localReasoningEffort().isEmpty())
+        body["reasoning_effort"] = localReasoningEffort();
     body["messages"] = OpenAiCompat::toMessages(buildSystemPrompt(), conversationHistory_);
     if (localUseTools())
         body["tools"] = OpenAiCompat::toTools(AiToolDefs::allTools());

@@ -59,6 +59,10 @@ public:
     static void setLocalApiKey(const QString& key);
     static bool localUseTools();
     static void setLocalUseTools(bool enabled);
+    // Thinking for local reasoning models, sent as reasoning_effort: "none",
+    // "low", "medium", "high", or empty to leave it to the model.
+    static QString localReasoningEffort();
+    static void setLocalReasoningEffort(const QString& effort);
     // Context window, in tokens, a local model needs for OpenDaw's system
     // prompt, the conversation and, when enabled, the DAW tool definitions.
     static int recommendedLocalContext(bool withTools);

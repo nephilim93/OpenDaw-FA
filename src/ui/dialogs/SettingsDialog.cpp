@@ -325,6 +325,22 @@ QWidget* SettingsDialog::createAiPage()
                            "the assistant is then chat-only.");
     localForm->addRow("", toolsCheck);
 
+    auto* thinkingCombo = new QComboBox(localGroup);
+    thinkingCombo->setAccessibleName("Local model thinking");
+    thinkingCombo->addItem("Off (fastest)", QString("none"));
+    thinkingCombo->addItem("Low", QString("low"));
+    thinkingCombo->addItem("Medium", QString("medium"));
+    thinkingCombo->addItem("High", QString("high"));
+    thinkingCombo->addItem("Model default", QString());
+    thinkingCombo->setToolTip("How much reasoning models (gemma4, qwen3, ...) think before "
+                              "answering. More thinking can plan better but takes minutes "
+                              "per step on a local GPU. Models without thinking ignore this.");
+    thinkingCombo->setCurrentIndex(qMax(0, thinkingCombo->findData(AiService::localReasoningEffort())));
+    localForm->addRow("Thinking:", thinkingCombo);
+    connect(thinkingCombo, &QComboBox::activated, this, [thinkingCombo]() {
+        AiService::setLocalReasoningEffort(thinkingCombo->currentData().toString());
+    });
+
     auto* localStatus = new QLabel(localGroup);
     localStatus->setAccessibleName("Local server status");
     localStatus->setWordWrap(true);
