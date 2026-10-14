@@ -162,7 +162,8 @@ public:
     juce::File currentFile() const { return currentFile_; }
     bool hasUnsavedChanges() const { return hasUnsavedChanges_; }
 
-    void startAutosave();
+    void startAutosave();  // (re)starts with the interval from Settings
+    void enableAllWaveInputDevices();
     void stopAutosave();
     void clearAutosave();
     static QString autosaveDir();
@@ -224,7 +225,6 @@ private:
     void teardownCurrentEdit();
     void createDefaultEdit();
     void ensureLevelMetersOnAllTracks();
-    void enableAllWaveInputDevices();
     void clearTrackInputInternal(te::AudioTrack& track);
 
     void saveInputDisplayNames();

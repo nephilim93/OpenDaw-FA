@@ -3,6 +3,7 @@
 #include "AudioEngine.h"
 #include <QObject>
 #include <QTimer>
+#include <QStringList>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <memory>
 #include <vector>
@@ -22,6 +23,12 @@ public:
     void startScan();
     bool isScanning() const { return scanning_; }
     juce::KnownPluginList& getPluginList();
+
+    // Extra folders (from Settings) scanned in addition to the defaults.
+    static QStringList extraFolders();
+    static void setExtraFolders(const QStringList& folders);
+    juce::StringArray defaultFolders() const;
+    void clearBlacklist();
 
     void loadCachedList();
     void saveCachedList();

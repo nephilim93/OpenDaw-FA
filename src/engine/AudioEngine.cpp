@@ -52,6 +52,15 @@ void AudioEngine::restoreSavedAudioSettings()
     if (!savedOutput.isEmpty())
         setup.outputDeviceName = juce::String(savedOutput.toUtf8().constData());
 
+    // An empty saved input means "None": no audio input is opened.
+    if (settings.contains("audio/inputDevice")) {
+        auto savedInput = settings.value("audio/inputDevice").toString();
+        setup.inputDeviceName = juce::String(savedInput.toUtf8().constData());
+        setup.useDefaultInputChannels = !savedInput.isEmpty();
+        if (savedInput.isEmpty())
+            setup.inputChannels.clear();
+    }
+
     double sr = settings.value("audio/sampleRate", 0.0).toDouble();
     if (sr > 0.0)
         setup.sampleRate = sr;
@@ -61,6 +70,24 @@ void AudioEngine::restoreSavedAudioSettings()
         setup.bufferSize = buf;
 
     adm.setAudioDeviceSetup(setup, true);
+}
+
+void AudioEngine::saveAudioSettings()
+{
+    auto& adm = engine_->getDeviceManager().deviceManager;
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    adm.getAudioDeviceSetup(setup);
+
+    auto toQ = [](const juce::String& s) { return QString::fromUtf8(s.toRawUTF8()); };
+
+    QSettings settings;
+    settings.setValue("audio/deviceType", toQ(adm.getCurrentAudioDeviceType()));
+    settings.setValue("audio/inputDevice", toQ(setup.inputDeviceName));
+    settings.setValue("audio/outputDevice", toQ(setup.outputDeviceName));
+    if (auto* device = adm.getCurrentAudioDevice()) {
+        settings.setValue("audio/sampleRate", device->getCurrentSampleRate());
+        settings.setValue("audio/bufferSize", device->getCurrentBufferSizeSamples());
+    }
 }
 
 juce::StringArray AudioEngine::getAvailableInputDevices() const
@@ -105,13 +132,27 @@ juce::StringArray AudioEngine::getAvailableMidiOutputDevices() const
     return result;
 }
 
-void AudioEngine::enableAllMidiInputDevices()
+void AudioEngine::applyMidiDeviceSettings()
 {
+    QSettings settings;
+    const QStringList disabledInputs = settings.value("midi/disabledInputs").toStringList();
+
     auto& dm = engine_->getDeviceManager();
     for (int i = 0; i < dm.getNumMidiInDevices(); ++i) {
-        auto dev = dm.getMidiInDevice(i);
-        if (dev)
-            dev->setEnabled(true);
+        if (auto dev = dm.getMidiInDevice(i)) {
+            const QString name = QString::fromUtf8(dev->getName().toRawUTF8());
+            dev->setEnabled(!disabledInputs.contains(name));
+        }
+    }
+
+    if (!settings.contains("midi/enabledOutputs"))
+        return;
+    const QStringList enabledOutputs = settings.value("midi/enabledOutputs").toStringList();
+    for (int i = 0; i < dm.getNumMidiOutDevices(); ++i) {
+        if (auto* dev = dm.getMidiOutDevice(i)) {
+            const QString name = QString::fromUtf8(dev->getName().toRawUTF8());
+            dev->setEnabled(enabledOutputs.contains(name));
+        }
     }
 }
 

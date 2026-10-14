@@ -155,7 +155,7 @@ void AiChatWidget::setupUi()
     settingsBtn->setAccessibleName("AI Settings");
     settingsBtn->setFixedSize(60, 24);
     settingsBtn->setStyleSheet(textBtnStyle);
-    connect(settingsBtn, &QPushButton::clicked, this, &AiChatWidget::showSettingsDialog);
+    connect(settingsBtn, &QPushButton::clicked, this, &AiChatWidget::settingsRequested);
     headerLayout->addWidget(settingsBtn);
 
     mainLayout_->addWidget(headerBar_);
@@ -333,7 +333,7 @@ void AiChatWidget::onSendClicked()
 
 void AiChatWidget::openSettings()
 {
-    showSettingsDialog();
+    emit settingsRequested();
 }
 
 void AiChatWidget::clearChatUi()
@@ -748,66 +748,6 @@ void AiChatWidget::loadChatSessions()
 }
 
 // ── Settings dialog ─────────────────────────────────────────────────────────
-
-void AiChatWidget::showSettingsDialog()
-{
-    auto& theme = ThemeManager::instance().current();
-
-    auto* dialog = new QDialog(this);
-    dialog->setWindowTitle("AI Settings");
-    dialog->setMinimumWidth(400);
-    dialog->setStyleSheet(
-        QString("QDialog { background: %1; color: %2; }"
-                "QLabel { color: %2; }"
-                "QLineEdit { background: %3; color: %2; border: 1px solid %4; "
-                "border-radius: 4px; padding: 4px 8px; }"
-                "QCheckBox { color: %2; }"
-                "QPushButton { background: %5; color: %2; border: 1px solid %4; "
-                "border-radius: 4px; padding: 6px 16px; }"
-                "QPushButton:hover { background: %6; }")
-            .arg(theme.background.name(), theme.text.name(),
-                 theme.surface.name(), theme.border.name(),
-                 theme.surface.name(), theme.surfaceLight.name()));
-
-    auto* layout = new QFormLayout(dialog);
-
-    auto* apiKeyEdit = new QLineEdit(aiService_->apiKey(), dialog);
-    apiKeyEdit->setAccessibleName("Anthropic API Key");
-    apiKeyEdit->setEchoMode(QLineEdit::Password);
-    apiKeyEdit->setPlaceholderText("sk-ant-...");
-    layout->addRow("API Key:", apiKeyEdit);
-
-    auto* modelEdit = new QLineEdit(aiService_->model(), dialog);
-    modelEdit->setAccessibleName("Model Name");
-    modelEdit->setPlaceholderText("claude-opus-4-6");
-    layout->addRow("Model:", modelEdit);
-
-    auto* confirmCheck = new QCheckBox("Confirm destructive actions", dialog);
-    confirmCheck->setAccessibleName("Confirm destructive actions");
-    confirmCheck->setChecked(aiService_->confirmDestructive());
-    layout->addRow("", confirmCheck);
-
-    auto* previewMixPlanCheck = new QCheckBox("Preview mix/master plan before applying changes", dialog);
-    previewMixPlanCheck->setAccessibleName("Preview mix master plan");
-    previewMixPlanCheck->setChecked(aiService_->previewMixPlanMode());
-    layout->addRow("", previewMixPlanCheck);
-
-    auto* btnBox = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, dialog);
-    layout->addRow(btnBox);
-
-    connect(btnBox, &QDialogButtonBox::accepted, dialog, [=]() {
-        aiService_->setApiKey(apiKeyEdit->text().trimmed());
-        aiService_->setModel(modelEdit->text().trimmed());
-        aiService_->setConfirmDestructive(confirmCheck->isChecked());
-        aiService_->setPreviewMixPlanMode(previewMixPlanCheck->isChecked());
-        dialog->accept();
-    });
-    connect(btnBox, &QDialogButtonBox::rejected, dialog, &QDialog::reject);
-
-    dialog->setAttribute(Qt::WA_DeleteOnClose);
-    dialog->exec();
-}
 
 // ── Markdown browser factory ────────────────────────────────────────────────
 

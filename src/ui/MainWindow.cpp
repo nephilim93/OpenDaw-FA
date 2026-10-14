@@ -5,7 +5,7 @@
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/sheetmusic/SheetMusicView.h"
 #include "ui/dialogs/ExportDialog.h"
-#include "ui/dialogs/AudioSettingsDialog.h"
+#include "ui/dialogs/SettingsDialog.h"
 #include "ui/video/VideoPlayerWidget.h"
 #include "ui/SplashScreen.h"
 #include "utils/ThemeManager.h"
@@ -401,16 +401,14 @@ void MainWindow::createMenus()
     });
 
     editMenu->addSeparator();
-    editMenu->addAction("AI &Preferences...", this, [this]() {
-        if (aiChatWidget_)
-            aiChatWidget_->openSettings();
-    });
-    editMenu->addSeparator();
-    editMenu->addAction("&Audio Settings...", this, [this]() {
-        AudioSettingsDialog dlg(app_.audioEngine(), this);
-        dlg.exec();
-        updateStatusBar();
-    });
+    // On macOS the PreferencesRole moves this to the app menu (Cmd+,).
+    auto* settingsAction = editMenu->addAction("&Settings...", QKeySequence::Preferences, this,
+        [this]() { openSettings(static_cast<int>(SettingsDialog::Page::Audio)); });
+    settingsAction->setMenuRole(QAction::PreferencesRole);
+    editMenu->addAction("&Audio Settings...", this,
+        [this]() { openSettings(static_cast<int>(SettingsDialog::Page::Audio)); });
+    editMenu->addAction("AI &Preferences...", this,
+        [this]() { openSettings(static_cast<int>(SettingsDialog::Page::Ai)); });
     editMenu->addSeparator();
     editMenu->addAction("Scan &VST Plugins...", this,
         &MainWindow::onScanVstPlugins);
@@ -952,6 +950,8 @@ void MainWindow::createDocks()
     aiChatWidget_ = new AiChatWidget(&editMgr_, &app_.audioEngine(),
                                      &app_.pluginScanner(), aiDock_);
     aiDock_->setWidget(aiChatWidget_);
+    connect(aiChatWidget_, &AiChatWidget::settingsRequested, this,
+            [this]() { openSettings(static_cast<int>(SettingsDialog::Page::Ai)); });
     addDockWidget(Qt::RightDockWidgetArea, aiDock_);
     qDebug() << "[MainWindow] AI dock done";
 
@@ -1005,10 +1005,7 @@ void MainWindow::onOpenProject()
 {
     if (!maybeSaveBeforeAction()) return;
 
-    QSettings settings;
-    QString startDir = settings.value("paths/lastFileDialogDir", QDir::homePath()).toString();
-    if (startDir.isEmpty() || !QDir(startDir).exists())
-        startDir = QDir::homePath();
+    const QString startDir = projectDialogStartDir(false);
 
     QString path = QFileDialog::getOpenFileName(
         this, "Open Project", startDir,
@@ -1121,9 +1118,7 @@ void MainWindow::onSaveProject()
 void MainWindow::onSaveProjectAs()
 {
     QSettings settings;
-    QString startDir = settings.value("paths/lastFileDialogDir", QDir::homePath()).toString();
-    if (startDir.isEmpty() || !QDir(startDir).exists())
-        startDir = QDir::homePath();
+    const QString startDir = projectDialogStartDir(editMgr_.currentFile() == juce::File());
 
     QString path = QFileDialog::getSaveFileName(
         this, "Save Project", startDir,
@@ -1249,6 +1244,34 @@ void MainWindow::onSplitClipAtPlayhead()
 void MainWindow::onAddMidiTrack()
 {
     editMgr_.addMidiTrack();
+}
+
+void MainWindow::openSettings(int page)
+{
+    SettingsDialog dlg(app_.audioEngine(), editMgr_, app_.pluginScanner(),
+                       [this]() { onScanVstPlugins(); }, this);
+    dlg.showPage(static_cast<SettingsDialog::Page>(page));
+    dlg.exec();
+    updateStatusBar();
+}
+
+// Folder the Open/Save dialogs start in: the last folder used, except that a
+// project that has never been saved starts in the default project folder
+// from Settings (when one is set).
+QString MainWindow::projectDialogStartDir(bool forNewProject) const
+{
+    QSettings settings;
+    const QString defaultDir = settings.value("paths/defaultProjectDir").toString();
+    const QString lastDir = settings.value("paths/lastFileDialogDir").toString();
+
+    QStringList candidates;
+    if (forNewProject) candidates << defaultDir << lastDir;
+    else candidates << lastDir << defaultDir;
+
+    for (const auto& dir : candidates)
+        if (!dir.isEmpty() && QDir(dir).exists())
+            return dir;
+    return QDir::homePath();
 }
 
 void MainWindow::onScanVstPlugins()

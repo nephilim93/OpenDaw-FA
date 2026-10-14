@@ -1,4 +1,5 @@
 ﻿#include "PluginScanner.h"
+#include <QSettings>
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <QDebug>
 
@@ -41,6 +42,8 @@ void PluginScanner::startScan()
 
     for (auto& fmt : formats_) {
         auto paths = fmt->getDefaultLocationsToSearch();
+        for (const auto& folder : extraFolders())
+            paths.addIfNotAlreadyThere(juce::File(juce::String(folder.toUtf8().constData())));
         totalFiles_ += fmt->searchPathsForPlugins(paths, true, true).size();
         auto scanner = std::make_unique<juce::PluginDirectoryScanner>(
             getPluginList(), *fmt, paths, true, pedal, false);
@@ -85,6 +88,34 @@ void PluginScanner::finishScan()
 juce::File PluginScanner::getDeadMansPedalFile() const
 {
     return getCacheFile().getSiblingFile("plugin-scan-pending.txt");
+}
+
+QStringList PluginScanner::extraFolders()
+{
+    return QSettings().value("plugins/extraFolders").toStringList();
+}
+
+void PluginScanner::setExtraFolders(const QStringList& folders)
+{
+    QSettings().setValue("plugins/extraFolders", folders);
+}
+
+juce::StringArray PluginScanner::defaultFolders() const
+{
+    juce::StringArray result;
+    for (auto& fmt : formats_) {
+        auto paths = fmt->getDefaultLocationsToSearch();
+        for (int i = 0; i < paths.getNumPaths(); ++i)
+            result.addIfNotAlreadyThere(paths.getRawString(i));
+    }
+    return result;
+}
+
+void PluginScanner::clearBlacklist()
+{
+    getPluginList().clearBlacklistedFiles();
+    getDeadMansPedalFile().deleteFile();
+    saveCachedList();
 }
 
 juce::KnownPluginList& PluginScanner::getPluginList()

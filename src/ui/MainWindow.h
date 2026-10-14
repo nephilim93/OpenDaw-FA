@@ -61,6 +61,8 @@ private:
     bool openProjectFile(const QString& path);
     void addRecentProject(const QString& path);
     void rebuildRecentMenu();
+    void openSettings(int page);
+    QString projectDialogStartDir(bool forNewProject) const;
     void onSaveProject();
     void onSaveProjectAs();
     void onExportAudio();

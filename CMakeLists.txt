@@ -96,7 +96,9 @@ set(OpenDaw_SOURCES
     src/ui/controls/WaveformWidget.h src/ui/controls/WaveformWidget.cpp
     src/ui/dialogs/ExportDialog.h        src/ui/dialogs/ExportDialog.cpp
     src/ui/dialogs/RecoveryDialog.h      src/ui/dialogs/RecoveryDialog.cpp
-    src/ui/dialogs/AudioSettingsDialog.h src/ui/dialogs/AudioSettingsDialog.cpp
+    src/ui/dialogs/AudioSettingsPage.h src/ui/dialogs/AudioSettingsPage.cpp
+    src/ui/dialogs/SettingsDialog.h src/ui/dialogs/SettingsDialog.cpp
+    src/utils/AppPaths.h
     src/ui/effects/EffectChainWidget.h   src/ui/effects/EffectChainWidget.cpp
     src/ui/effects/DelayEffectWidget.h   src/ui/effects/DelayEffectWidget.cpp
     src/ui/effects/EffectSelectorDialog.h src/ui/effects/EffectSelectorDialog.cpp

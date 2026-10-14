@@ -30,16 +30,17 @@ public:
 
     void requestSessionTitle(const QString& userMessage);
 
-    QString apiKey() const;
-    void setApiKey(const QString& key);
+    // Settings (stored in QSettings; edited from the Settings window)
+    static QString apiKey();
+    static void setApiKey(const QString& key);
 
-    QString model() const;
-    void setModel(const QString& model);
+    static QString model();
+    static void setModel(const QString& model);
 
-    bool confirmDestructive() const;
-    void setConfirmDestructive(bool confirm);
-    bool previewMixPlanMode() const;
-    void setPreviewMixPlanMode(bool enabled);
+    static bool confirmDestructive();
+    static void setConfirmDestructive(bool confirm);
+    static bool previewMixPlanMode();
+    static void setPreviewMixPlanMode(bool enabled);
 
     bool isBusy() const { return busy_; }
 
