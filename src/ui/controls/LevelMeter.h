@@ -22,6 +22,7 @@ protected:
 
 private:
     float peakDecay(float current, float peak) const;
+    void  updateIfChanged();
 
     float levelL_    = 0.0f;
     float levelR_    = 0.0f;
@@ -29,6 +30,7 @@ private:
     float peakR_     = 0.0f;
     bool  stereo_    = false;
     QTimer decayTimer_;
+    int   paintedState_[4] = { -1, -1, -1, -1 };
 };
 
 } // namespace OpenDaw

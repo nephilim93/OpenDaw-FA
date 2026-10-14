@@ -5,6 +5,7 @@
 #include <QInputDialog>
 #include <QContextMenuEvent>
 #include <cmath>
+#include <cmath>
 
 namespace OpenDaw {
 
@@ -37,6 +38,7 @@ void MarkerTempoLane::refresh()
 
 void MarkerTempoLane::setPlayheadBeat(double beat)
 {
+    if (std::abs(beat - playheadBeat_) < 1e-6) return;
     playheadBeat_ = beat;
     update();
 }

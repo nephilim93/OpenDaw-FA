@@ -1,6 +1,7 @@
 #include "LevelMeter.h"
 #include "utils/ThemeManager.h"
 #include <QPainter>
+#include <algorithm>
 #include <cmath>
 
 namespace OpenDaw {
@@ -16,9 +17,13 @@ LevelMeter::LevelMeter(QWidget* parent)
         peakR_ *= decay;
         levelL_ *= 0.85f;
         levelR_ *= 0.85f;
-        update();
+        if (peakL_ < 1e-4f && peakR_ < 1e-4f) {
+            peakL_ = peakR_ = levelL_ = levelR_ = 0.0f;
+            decayTimer_.stop();
+        }
+        updateIfChanged();
     });
-    decayTimer_.start(30);
+    decayTimer_.setInterval(30);
 }
 
 void LevelMeter::setLevel(float l, float r)
@@ -27,6 +32,22 @@ void LevelMeter::setLevel(float l, float r)
     levelR_ = std::clamp(r, 0.0f, 1.0f);
     if (levelL_ > peakL_) peakL_ = levelL_;
     if (levelR_ > peakR_) peakR_ = levelR_;
+    if ((peakL_ > 0.0f || peakR_ > 0.0f) && !decayTimer_.isActive())
+        decayTimer_.start();
+    updateIfChanged();
+}
+
+// Meters are polled every 30 ms; only repaint when a bar would move by at
+// least a pixel, so silent meters cost nothing.
+void LevelMeter::updateIfChanged()
+{
+    const float h = float(height());
+    const int state[4] = {
+        int(levelL_ * h), int(levelR_ * h), int(peakL_ * h), int(peakR_ * h)
+    };
+    if (std::equal(std::begin(state), std::end(state), std::begin(paintedState_)))
+        return;
+    std::copy(std::begin(state), std::end(state), std::begin(paintedState_));
     update();
 }
 
