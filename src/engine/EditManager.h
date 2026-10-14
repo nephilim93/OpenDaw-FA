@@ -72,6 +72,12 @@ public:
                             const juce::PluginDescription& desc);
     void removeTrackInstrument(te::AudioTrack& track);
 
+    // MIDI FX sit before the instrument and process the track's MIDI. VST
+    // MIDI FX often report themselves as synths, so they carry a marker in
+    // their state and are never treated as the track's instrument.
+    static bool isMidiFxPlugin(const te::Plugin* plugin);
+    void addMidiFx(te::AudioTrack& track, te::Plugin::Ptr plugin);
+
     void markAsMidiTrack(te::AudioTrack* track);
 
     void trimNotesToClipBounds(te::MidiClip& clip);
