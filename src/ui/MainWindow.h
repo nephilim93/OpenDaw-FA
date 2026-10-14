@@ -58,6 +58,9 @@ private:
 
     void onNewProject();
     void onOpenProject();
+    bool openProjectFile(const QString& path);
+    void addRecentProject(const QString& path);
+    void rebuildRecentMenu();
     void onSaveProject();
     void onSaveProjectAs();
     void onExportAudio();
@@ -73,6 +76,7 @@ private:
 
     OpenDawApplication& app_;
     EditManager& editMgr_;
+    QMenu* recentMenu_ = nullptr;
 
     TransportBar* transportBar_       = nullptr;
     TimelineView* timelineView_       = nullptr;
