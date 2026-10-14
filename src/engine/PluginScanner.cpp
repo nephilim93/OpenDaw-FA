@@ -133,7 +133,9 @@ void PluginScanner::loadCachedList()
     auto& kpl = getPluginList();
     for (int i = kpl.getNumTypes() - 1; i >= 0; --i) {
         auto desc = kpl.getTypes()[i];
-        if (!juce::File(desc.fileOrIdentifier).existsAsFile())
+        // Plugins are often bundles (directories): .vst/.vst3 on macOS and
+        // bundle-format .vst3 on Windows, so check exists(), not existsAsFile().
+        if (!juce::File(desc.fileOrIdentifier).exists())
             kpl.removeType(desc);
     }
 }
