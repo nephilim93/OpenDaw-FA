@@ -225,6 +225,9 @@ target_link_libraries(OpenDaw PRIVATE
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
     target_compile_options(OpenDaw PRIVATE -Wno-unknown-pragmas)
+    # GCC 14+ reports errors in uninstantiated template bodies. Tracktion's bundled
+    # nanorange.hpp has one (iota_view::iterator uses x.value instead of x.value_).
+    target_compile_options(OpenDaw PRIVATE -Wno-template-body)
 endif()
 
 if(MSVC)
