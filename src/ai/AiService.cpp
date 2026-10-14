@@ -1,6 +1,7 @@
 #include "AiService.h"
 #include "engine/EditManager.h"
 #include "engine/AudioEngine.h"
+#include <QDebug>
 #include <QNetworkRequest>
 #include <QUrl>
 
@@ -10,6 +11,10 @@ static const QString kApiUrl = "https://api.anthropic.com/v1/messages";
 static const QString kDefaultModel = "claude-opus-5-5";
 // Thinking counts toward max_tokens, so leave room for it as well as the reply.
 static const int kMaxTokens = 32000;
+// Upper bound for one local reply, thinking included. Local servers have no
+// limit by default, so a model that keeps reasoning holds the GPU until it
+// stops on its own.
+static const int kMaxLocalTokens = 16384;
 
 namespace {
 
@@ -500,6 +505,7 @@ void AiService::sendToLocalServer()
     QJsonObject body;
     body["model"] = localModel();
     body["stream"] = true;
+    body["max_tokens"] = kMaxLocalTokens;
     body["messages"] = OpenAiCompat::toMessages(buildSystemPrompt(), conversationHistory_);
     if (localUseTools())
         body["tools"] = OpenAiCompat::toTools(AiToolDefs::allTools());
@@ -513,6 +519,7 @@ void AiService::sendToLocalServer()
     // Local models can take a while to load before the first token.
     request.setTransferTimeout(300000);
 
+    localTimer_.start();
     currentReply_ = nam_->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(currentReply_, &QNetworkReply::readyRead,
             this, &AiService::handleLocalStreamChunk);
@@ -539,9 +546,12 @@ void AiService::handleLocalStreamChunk()
         auto doc = QJsonDocument::fromJson(jsonData);
         if (!doc.isObject()) continue;
 
+        const int reasoningBefore = localStream_.reasoningChunks;
         const QString text = OpenAiCompat::applyChunk(doc.object(), localStream_);
         if (!text.isEmpty())
             emit tokenReceived(text);
+        else if (localStream_.reasoningChunks != reasoningBefore)
+            emit thinkingProgress(localStream_.reasoningChunks);
     }
 }
 
@@ -653,6 +663,20 @@ void AiService::handleStreamFinished()
 {
     if (!currentReply_) return;
 
+    if (localRequest_) {
+        QStringList calls;
+        for (const auto& call : localStream_.toolCalls)
+            calls << QString("%1 (%2 chars)").arg(call.name).arg(call.arguments.size());
+        qInfo().noquote() << QString("[AI local] %1 s, finish=%2, thinking=%3 chunks, "
+                                     "text=%4 chars, tools=[%5], network=%6")
+            .arg(localTimer_.elapsed() / 1000.0, 0, 'f', 1)
+            .arg(localStream_.finishReason.isEmpty() ? "none" : localStream_.finishReason)
+            .arg(localStream_.reasoningChunks).arg(localStream_.text.size())
+            .arg(calls.join(", "))
+            .arg(currentReply_->error() == QNetworkReply::NoError ? "ok"
+                                                                 : currentReply_->errorString());
+    }
+
     if (currentReply_->error() != QNetworkReply::NoError
         && currentReply_->error() != QNetworkReply::OperationCanceledError) {
         QByteArray responseBody = currentReply_->readAll();
@@ -681,7 +705,16 @@ void AiService::handleStreamFinished()
     currentReply_ = nullptr;
 
     if (localRequest_) {
-        currentContentBlocks_ = OpenAiCompat::toContentBlocks(localStream_);
+        QStringList badToolCalls;
+        currentContentBlocks_ = OpenAiCompat::toContentBlocks(localStream_, &badToolCalls);
+        if (localStream_.finishReason == "length")
+            emit errorOccurred(QString("The model reached the %1-token output limit before "
+                                       "finishing, so its last step may be incomplete. Try a "
+                                       "smaller request, or a model that thinks less.")
+                                   .arg(kMaxLocalTokens));
+        if (!badToolCalls.isEmpty())
+            emit errorOccurred(QString("The model sent invalid arguments for %1, so that "
+                                       "step did nothing.").arg(badToolCalls.join(", ")));
         // An empty assistant turn would be rejected if the chat later moves to
         // Claude, so record that nothing came back.
         if (currentContentBlocks_.isEmpty()) {

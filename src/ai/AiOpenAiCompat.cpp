@@ -80,6 +80,10 @@ QString applyChunk(const QJsonObject& chunk, StreamState& state)
     const QString text = delta["content"].toString();
     state.text += text;
 
+    // Ollama uses "reasoning", vLLM and LM Studio "reasoning_content".
+    if (!delta["reasoning"].toString().isEmpty() || !delta["reasoning_content"].toString().isEmpty())
+        ++state.reasoningChunks;
+
     // Tool calls arrive in pieces: the first piece of each carries its id and
     // name, later pieces append to the arguments string.
     for (const auto& val : delta["tool_calls"].toArray()) {
@@ -98,7 +102,7 @@ QString applyChunk(const QJsonObject& chunk, StreamState& state)
     return text;
 }
 
-QVector<AiContentBlock> toContentBlocks(const StreamState& state)
+QVector<AiContentBlock> toContentBlocks(const StreamState& state, QStringList* badToolCalls)
 {
     QVector<AiContentBlock> blocks;
     if (!state.text.isEmpty()) {
@@ -116,7 +120,12 @@ QVector<AiContentBlock> toContentBlocks(const StreamState& state)
             ? "call_" + QUuid::createUuid().toString(QUuid::Id128)
             : call.id;
         block.toolCall.name = call.name;
-        block.toolCall.input = QJsonDocument::fromJson(call.arguments.toUtf8()).object();
+        const auto args = QJsonDocument::fromJson(call.arguments.trimmed().isEmpty()
+                                                      ? QByteArray("{}")
+                                                      : call.arguments.toUtf8());
+        if (!args.isObject() && badToolCalls)
+            badToolCalls->append(call.name);
+        block.toolCall.input = args.object();
         blocks.append(block);
     }
     return blocks;

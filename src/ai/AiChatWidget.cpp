@@ -33,6 +33,9 @@ AiChatWidget::AiChatWidget(EditManager* editMgr, AudioEngine* audioEngine,
     connect(aiService_, &AiService::errorOccurred, this, &AiChatWidget::onError);
     connect(aiService_, &AiService::confirmDestructiveAction, this, &AiChatWidget::onConfirmDestructive);
     connect(aiService_, &AiService::busyChanged, this, &AiChatWidget::onBusyChanged);
+    connect(aiService_, &AiService::thinkingProgress, this, [this](int chunks) {
+        statusLabel_->setText(QString("Thinking... (%1 tokens)").arg(chunks));
+    });
     connect(aiService_, &AiService::sessionTitleGenerated, this, &AiChatWidget::onSessionTitleGenerated);
 
     streamThrottle_ = new QTimer(this);

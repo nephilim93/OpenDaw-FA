@@ -5,6 +5,7 @@
 #include <QJsonObject>
 #include <QMap>
 #include <QString>
+#include <QStringList>
 #include <QVector>
 
 namespace OpenDaw {
@@ -29,13 +30,18 @@ struct StreamState {
     QString text;
     QMap<int, ToolCall> toolCalls;  // by stream index
     QString finishReason;
+    // Reasoning models (gemma4, qwen3, deepseek-r1 on Ollama) stream their
+    // thinking separately from the reply; only its size is kept.
+    int reasoningChunks = 0;
 };
 
 // Applies one parsed "data:" chunk; returns any new reply text.
 QString applyChunk(const QJsonObject& chunk, StreamState& state);
 
-// The finished reply as content blocks (text, then tool_use).
-QVector<AiContentBlock> toContentBlocks(const StreamState& state);
+// The finished reply as content blocks (text, then tool_use). Names of tool
+// calls whose arguments are not a JSON object are added to `badToolCalls`.
+QVector<AiContentBlock> toContentBlocks(const StreamState& state,
+                                        QStringList* badToolCalls = nullptr);
 
 } // namespace OpenAiCompat
 } // namespace OpenDaw

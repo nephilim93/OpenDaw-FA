@@ -4,6 +4,7 @@
 #include "AiToolDefs.h"
 #include "AiToolExecutor.h"
 #include "AiOpenAiCompat.h"
+#include <QElapsedTimer>
 #include <QObject>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -66,6 +67,9 @@ public:
 
 signals:
     void tokenReceived(const QString& token);
+    // Local reasoning models: thinking so far, in streamed chunks (about one
+    // token each). Lets the chat show progress while no reply text arrives.
+    void thinkingProgress(int chunks);
     void responseComplete(const AiMessage& message);
     void toolCallStarted(const QString& toolName, const QString& toolId);
     void toolCallFinished(const QString& toolName, const QString& toolId,
@@ -115,6 +119,7 @@ private:
     QString currentStopReason_;
     bool localRequest_ = false;
     OpenAiCompat::StreamState localStream_;
+    QElapsedTimer localTimer_;
     QString currentRefusalCategory_;
 
     bool busy_ = false;
