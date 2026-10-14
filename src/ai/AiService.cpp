@@ -277,6 +277,8 @@ const char* const AiService::kSystemPromptRules =
               "- You can create MIDI clips and write notes into them. Use create_midi_clip to make a clip, "
               "then add_midi_notes to populate it. Note positions are in beats relative to clip start. "
               "Batch as many notes as possible into a single add_midi_notes call for efficiency. "
+              "For arpeggios, broken chords, block-chord comping and other repeating chord-based "
+              "parts, use generate_midi_pattern with the chord progression instead of listing notes. "
               "Middle C is MIDI note 60. A bar in 4/4 time is 4 beats.\n"
               "- When users ask about effects parameters, use get_track_effects to see "
               "current values before modifying them.\n"

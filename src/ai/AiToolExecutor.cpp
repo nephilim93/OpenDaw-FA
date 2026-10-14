@@ -1,4 +1,5 @@
 #include "AiToolExecutor.h"
+#include "music/Patterns.h"
 #include <tracktion_engine/tracktion_engine.h>
 #include <cmath>
 #include <algorithm>
@@ -1184,6 +1185,88 @@ void AiToolExecutor::registerHandlers()
         QJsonObject result;
         result["added"] = added;
         result["total_notes"] = seq.getNotes().size();
+        return ok(id, result);
+    };
+
+    handlers_["generate_midi_pattern"] = [this](const QJsonObject& input, const QString& id) -> AiToolResult {
+        auto* track = resolveTrack(input["track"]);
+        if (!track) return err(id, "Track not found.");
+
+        Patterns::Spec spec;
+        for (const auto& c : input["chords"].toArray())
+            spec.chords << c.toString();
+        spec.key = input["key"].toString();
+        spec.pattern = input["pattern"].toString("up");
+        for (const auto& s : input["steps"].toArray())
+            spec.steps << s.toInt();
+        spec.rate = input["rate"].toString("1/8");
+        spec.octave = std::clamp(input["octave"].toInt(4), 0, 8);
+        spec.octaves = std::clamp(input["octaves"].toInt(1), 1, 4);
+        spec.beatsPerChord = std::clamp(input["beats_per_chord"].toDouble(4.0), 0.25, 64.0);
+        if (input.contains("bars"))
+            spec.totalBeats = std::clamp(input["bars"].toDouble(), 0.25, 1000.0) * 4.0;
+        spec.velocity = std::clamp(input["velocity"].toInt(90), 1, 127);
+        spec.accent = std::clamp(input["accent"].toInt(12), 0, 60);
+        spec.gate = input["gate"].toDouble(0.9);
+        spec.swing = input["swing"].toDouble(0.0);
+        spec.seed = input["seed"].toInt(1);
+
+        const auto pattern = Patterns::generate(spec);
+        if (!pattern.error.isEmpty()) return err(id, pattern.error);
+        if (pattern.notes.isEmpty()) return err(id, "The pattern produced no notes.");
+
+        const double startBeat = std::max(0.0, input["start_beat"].toDouble(0.0));
+        const double patternBeats = spec.totalBeats > 0.0 ? spec.totalBeats
+                                                          : spec.beatsPerChord * spec.chords.size();
+        const int channel = std::clamp(input["channel"].toInt(1), 1, 16);
+
+        auto* um = &editMgr_->edit()->getUndoManager();
+        um->beginNewTransaction("AI: Generate MIDI Pattern");
+
+        te::MidiClip* midiClip = nullptr;
+        double noteOffset = startBeat;
+        if (input.contains("clip_index")) {
+            const int clipIdx = input["clip_index"].toInt();
+            auto clips = track->getClips();
+            if (clipIdx < 0 || clipIdx >= clips.size())
+                return err(id, QString("Clip index %1 out of range (track has %2 clips).")
+                                   .arg(clipIdx).arg(clips.size()));
+            midiClip = dynamic_cast<te::MidiClip*>(clips[clipIdx]);
+            if (!midiClip)
+                return err(id, QString("Clip at index %1 is not a MIDI clip.").arg(clipIdx));
+        } else {
+            midiClip = editMgr_->addMidiClipToTrack(*track, startBeat, patternBeats);
+            if (!midiClip) return err(id, "Failed to create MIDI clip.");
+            midiClip->setMidiChannel(te::MidiChannel(channel));
+            const QString name = input["name"].toString();
+            midiClip->setName(juce::String((name.isEmpty() ? spec.chords.join(' ') : name).toStdString()));
+            if (!editMgr_->isMidiTrack(track))
+                editMgr_->markAsMidiTrack(track);
+            noteOffset = 0.0;
+        }
+
+        auto& seq = midiClip->getSequence();
+        for (const auto& note : pattern.notes)
+            seq.addNote(note.pitch,
+                        tracktion::BeatPosition::fromBeats(noteOffset + note.startBeat),
+                        tracktion::BeatDuration::fromBeats(note.lengthBeats),
+                        note.velocity, channel - 1, um);
+
+        int clipIndex = 0;
+        for (auto* c : track->getClips()) {
+            if (c == midiClip) break;
+            clipIndex++;
+        }
+
+        emitEditChanged();
+        emitTracksChanged();
+        emitMidiClipModified(midiClip);
+
+        QJsonObject result;
+        result["added"] = pattern.notes.size();
+        result["clip_index"] = clipIndex;
+        result["length_beats"] = patternBeats;
+        result["chords"] = QJsonArray::fromStringList(pattern.resolvedChords);
         return ok(id, result);
     };
 
