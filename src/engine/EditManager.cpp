@@ -573,6 +573,70 @@ te::MidiClip* EditManager::importMidiFileToTrack(te::AudioTrack& track,
     return firstClip;
 }
 
+bool EditManager::exportMidiFile(const juce::File& destFile)
+{
+    if (!edit_) return false;
+
+    constexpr int ticksPerBeat = 960;
+    auto toTicks = [](double beats) { return beats * ticksPerBeat; };
+
+    juce::MidiFile midi;
+    midi.setTicksPerQuarterNote(ticksPerBeat);
+
+    // Track 0 carries the tempo map and time signatures.
+    auto& ts = edit_->tempoSequence;
+    juce::MidiMessageSequence conductor;
+    for (auto* tempo : ts.getTempos()) {
+        auto msg = juce::MidiMessage::tempoMetaEvent(
+            juce::roundToInt(60000000.0 / tempo->getBpm()));
+        msg.setTimeStamp(toTicks(tempo->getStartBeat().inBeats()));
+        conductor.addEvent(msg);
+    }
+    for (auto* sig : ts.getTimeSigs()) {
+        auto msg = juce::MidiMessage::timeSignatureMetaEvent(sig->numerator, sig->denominator);
+        msg.setTimeStamp(toTicks(sig->getStartBeat().inBeats()));
+        conductor.addEvent(msg);
+    }
+    conductor.sort();
+    midi.addTrack(conductor);
+
+    int exportedTracks = 0;
+    for (auto* track : getAudioTracksInDisplayOrder()) {
+        if (!isMidiTrack(track)) continue;
+
+        juce::MidiMessageSequence seq;
+        auto name = juce::MidiMessage::textMetaEvent(3, track->getName());
+        name.setTimeStamp(0);
+        seq.addEvent(name);
+
+        for (auto* clip : track->getClips()) {
+            auto* midiClip = dynamic_cast<te::MidiClip*>(clip);
+            if (!midiClip || midiClip->isMuted()) continue;
+
+            // Event times come back in edit-timeline beats, trimmed to the clip.
+            auto clipSeq = midiClip->getSequence().exportToPlaybackMidiSequence(
+                *midiClip, te::MidiList::TimeBase::beats, false);
+            for (auto* ev : clipSeq) {
+                auto msg = ev->message;
+                msg.setTimeStamp(toTicks(msg.getTimeStamp()));
+                seq.addEvent(msg);
+            }
+        }
+
+        seq.sort();
+        seq.updateMatchedPairs();
+        midi.addTrack(seq);
+        ++exportedTracks;
+    }
+
+    if (exportedTracks == 0) return false;
+
+    destFile.deleteFile();
+    juce::FileOutputStream out(destFile);
+    if (!out.openedOk()) return false;
+    return midi.writeTo(out, 1);
+}
+
 bool EditManager::isMidiTrack(te::AudioTrack* track) const
 {
     if (!track) return false;

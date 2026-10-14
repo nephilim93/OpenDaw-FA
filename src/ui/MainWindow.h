@@ -61,6 +61,8 @@ private:
     void onSaveProject();
     void onSaveProjectAs();
     void onExportAudio();
+    void onImportMidi();
+    void onExportMidi();
     void onAddTrack();
     void onAddMidiTrack();
     void onRemoveTrack();
