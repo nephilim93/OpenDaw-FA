@@ -668,6 +668,26 @@ QJsonArray AiToolDefs::allTools()
     {
         QJsonObject props;
         props["track"] = trackProp();
+        props["clip_index"] = propNumber("Zero-based index of the MIDI clip on the track.", 0, 10000);
+        props["grid"] = prop("string", "Grid: 1/4, 1/8, 1/16, 1/32, a triplet such as 1/8t or "
+            "1/16t, or bar. Default 1/16.");
+        props["strength"] = propNumber("0-100: how far notes move toward the grid. Default 100.", 0, 100);
+        props["swing"] = propNumber("0-100: delays every second grid line, 100 = triplet feel. "
+            "Default 0.", 0, 100);
+        props["quantize_lengths"] = prop("boolean", "Also round note lengths to the grid. Default false.");
+        props["scale"] = prop("string", "Optional key or scale, e.g. 'G minor', 'D dorian', "
+            "'A minor pentatonic'. Each out-of-scale note moves to the nearest scale note "
+            "(the lower one on a tie).");
+        tools.append(makeTool("quantize_midi_notes",
+            "Tighten the timing of a MIDI clip's notes to a grid, with strength and swing, and "
+            "optionally snap pitches to a key or scale, as one undoable step. Use it to clean up "
+            "recorded or generated parts, add groove with swing, or fix wrong notes in a key.",
+            props, QJsonArray({"track", "clip_index"})));
+    }
+
+    {
+        QJsonObject props;
+        props["track"] = trackProp();
         tools.append(makeTool("get_clips_on_track",
             "List all clips on a track with their index, name, type (audio/midi), "
             "start beat, length in beats, and for MIDI clips the note count.",

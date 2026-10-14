@@ -1,5 +1,6 @@
 #include "AiToolExecutor.h"
 #include "music/Patterns.h"
+#include "music/Quantize.h"
 #include <tracktion_engine/tracktion_engine.h>
 #include <cmath>
 #include <algorithm>
@@ -1267,6 +1268,66 @@ void AiToolExecutor::registerHandlers()
         result["clip_index"] = clipIndex;
         result["length_beats"] = patternBeats;
         result["chords"] = QJsonArray::fromStringList(pattern.resolvedChords);
+        return ok(id, result);
+    };
+
+    handlers_["quantize_midi_notes"] = [this](const QJsonObject& input, const QString& id) -> AiToolResult {
+        auto* track = resolveTrack(input["track"]);
+        if (!track) return err(id, "Track not found.");
+
+        const int clipIdx = input["clip_index"].toInt();
+        auto clips = track->getClips();
+        if (clipIdx < 0 || clipIdx >= clips.size())
+            return err(id, QString("Clip index %1 out of range (track has %2 clips).")
+                               .arg(clipIdx).arg(clips.size()));
+        auto* midiClip = dynamic_cast<te::MidiClip*>(clips[clipIdx]);
+        if (!midiClip)
+            return err(id, QString("Clip at index %1 is not a MIDI clip.").arg(clipIdx));
+
+        Quantize::Options options;
+        const QString grid = input["grid"].toString("1/16");
+        options.grid = Quantize::gridToBeats(grid);
+        if (options.grid <= 0.0)
+            return err(id, QString("Unknown grid '%1'. Use 1/4, 1/8, 1/16, 1/32, a triplet "
+                                   "such as 1/8t, or bar.").arg(grid));
+        options.strength = std::clamp(input["strength"].toDouble(100.0), 0.0, 100.0) / 100.0;
+        options.swing = input["swing"].toDouble(0.0);
+        options.lengths = input["quantize_lengths"].toBool(false);
+        if (!input["scale"].toString().trimmed().isEmpty()) {
+            options.scale = Theory::parseScale(input["scale"].toString());
+            if (!options.scale)
+                return err(id, QString("Unknown scale '%1'. Use e.g. 'G minor', 'Bb major', "
+                                       "'D dorian'.").arg(input["scale"].toString()));
+        }
+
+        auto* um = &editMgr_->edit()->getUndoManager();
+        um->beginNewTransaction("AI: Quantize MIDI Notes");
+
+        int timing = 0, pitches = 0;
+        for (auto* note : midiClip->getSequence().getNotes()) {
+            const Quantize::Note before{ note->getNoteNumber(), note->getStartBeat().inBeats(),
+                                         note->getLengthBeats().inBeats() };
+            const auto after = Quantize::apply(before, options);
+            if (std::abs(after.startBeat - before.startBeat) > 1e-9
+                || std::abs(after.lengthBeats - before.lengthBeats) > 1e-9) {
+                note->setStartAndLength(tracktion::BeatPosition::fromBeats(after.startBeat),
+                                        tracktion::BeatDuration::fromBeats(after.lengthBeats), um);
+                ++timing;
+            }
+            if (after.pitch != before.pitch) {
+                note->setNoteNumber(after.pitch, um);
+                ++pitches;
+            }
+        }
+
+        emitEditChanged();
+        emitMidiClipModified(midiClip);
+
+        QJsonObject result;
+        result["notes"] = midiClip->getSequence().getNotes().size();
+        result["timing_changed"] = timing;
+        result["pitches_changed"] = pitches;
+        if (options.scale) result["scale"] = options.scale->name;
         return ok(id, result);
     };
 

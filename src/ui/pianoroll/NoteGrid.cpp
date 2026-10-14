@@ -1,5 +1,6 @@
 ﻿#include "NoteGrid.h"
 #include "utils/ThemeManager.h"
+#include "music/Quantize.h"
 #include <QScrollBar>
 #include <QWheelEvent>
 #include <QKeyEvent>
@@ -19,6 +20,7 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QCheckBox>
+#include <QSettings>
 #include <cmath>
 #include <random>
 #include <algorithm>
@@ -677,8 +679,9 @@ void NoteGrid::showQuantizeDialog()
     auto* dlg = new QDialog(this);
     dlg->setWindowTitle("Quantize");
     dlg->setAccessibleName("Quantize Dialog");
-    dlg->setFixedWidth(320);
+    dlg->setFixedWidth(380);
     dlg->setAttribute(Qt::WA_DeleteOnClose);
+    QSettings settings;
 
     auto* form = new QFormLayout();
     form->setContentsMargins(12, 12, 12, 6);
@@ -687,7 +690,9 @@ void NoteGrid::showQuantizeDialog()
     gridCombo->setAccessibleName("Grid Size");
     gridCombo->addItem("1/32", 0.125);
     gridCombo->addItem("1/16", 0.25);
+    gridCombo->addItem("1/16 triplet", 1.0 / 6.0);
     gridCombo->addItem("1/8", 0.5);
+    gridCombo->addItem("1/8 triplet", 1.0 / 3.0);
     gridCombo->addItem("1/4", 1.0);
     gridCombo->addItem("Bar", 4.0);
     double currentGrid = snapper_.gridIntervalBeats();
@@ -713,10 +718,51 @@ void NoteGrid::showQuantizeDialog()
     strengthRow->addWidget(strengthLabel);
     form->addRow("Strength:", strengthRow);
 
+    auto* swingSlider = new QSlider(Qt::Horizontal, dlg);
+    swingSlider->setAccessibleName("Swing");
+    swingSlider->setRange(0, 100);
+    swingSlider->setValue(settings.value("pianoroll/quantize/swing", 0).toInt());
+    swingSlider->setToolTip("Delays every second grid line; 100% is a triplet feel.");
+    auto* swingLabel = new QLabel(QString("%1%").arg(swingSlider->value()), dlg);
+    swingLabel->setAccessibleName("Swing Value");
+    connect(swingSlider, &QSlider::valueChanged, swingLabel,
+            [swingLabel](int val) { swingLabel->setText(QString("%1%").arg(val)); });
+    auto* swingRow = new QHBoxLayout();
+    swingRow->addWidget(swingSlider, 1);
+    swingRow->addWidget(swingLabel);
+    form->addRow("Swing:", swingRow);
+
     auto* quantizeLengthCheck = new QCheckBox("Quantize note lengths", dlg);
     quantizeLengthCheck->setAccessibleName("Quantize Lengths");
-    quantizeLengthCheck->setChecked(false);
+    quantizeLengthCheck->setChecked(settings.value("pianoroll/quantize/lengths", false).toBool());
     form->addRow(quantizeLengthCheck);
+
+    // Scale snap: out-of-key notes move to the nearest note of the scale.
+    auto* scaleCheck = new QCheckBox("Snap pitches to scale", dlg);
+    scaleCheck->setAccessibleName("Snap Pitches To Scale");
+    scaleCheck->setChecked(settings.value("pianoroll/quantize/scaleSnap", false).toBool());
+    form->addRow(scaleCheck);
+
+    auto* rootCombo = new QComboBox(dlg);
+    rootCombo->setAccessibleName("Scale Root");
+    rootCombo->addItems({ "C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B" });
+    rootCombo->setCurrentText(settings.value("pianoroll/quantize/scaleRoot", "C").toString());
+    auto* modeCombo = new QComboBox(dlg);
+    modeCombo->setAccessibleName("Scale Mode");
+    modeCombo->addItems({ "major", "natural minor", "harmonic minor", "melodic minor",
+                          "dorian", "phrygian", "lydian", "mixolydian", "locrian",
+                          "major pentatonic", "minor pentatonic", "blues" });
+    modeCombo->setCurrentText(settings.value("pianoroll/quantize/scaleMode", "major").toString());
+    auto* scaleRow = new QHBoxLayout();
+    scaleRow->addWidget(rootCombo);
+    scaleRow->addWidget(modeCombo, 1);
+    form->addRow("Scale:", scaleRow);
+    auto updateScaleEnabled = [scaleCheck, rootCombo, modeCombo]() {
+        rootCombo->setEnabled(scaleCheck->isChecked());
+        modeCombo->setEnabled(scaleCheck->isChecked());
+    };
+    connect(scaleCheck, &QCheckBox::toggled, dlg, updateScaleEnabled);
+    updateScaleEnabled();
 
     auto* btnLayout = new QHBoxLayout();
     btnLayout->addStretch();
@@ -734,10 +780,22 @@ void NoteGrid::showQuantizeDialog()
 
     connect(cancelBtn, &QPushButton::clicked, dlg, &QDialog::reject);
     connect(okBtn, &QPushButton::clicked, dlg,
-        [this, dlg, gridCombo, strengthSlider, quantizeLengthCheck]() {
-        double grid = gridCombo->currentData().toDouble();
-        double strength = strengthSlider->value() / 100.0;
-        bool quantizeLen = quantizeLengthCheck->isChecked();
+        [this, dlg, gridCombo, strengthSlider, swingSlider, quantizeLengthCheck,
+         scaleCheck, rootCombo, modeCombo]() {
+        Quantize::Options options;
+        options.grid = gridCombo->currentData().toDouble();
+        options.strength = strengthSlider->value() / 100.0;
+        options.swing = swingSlider->value();
+        options.lengths = quantizeLengthCheck->isChecked();
+        if (scaleCheck->isChecked())
+            options.scale = Theory::parseScale(rootCombo->currentText() + " " + modeCombo->currentText());
+
+        QSettings settings;
+        settings.setValue("pianoroll/quantize/swing", swingSlider->value());
+        settings.setValue("pianoroll/quantize/lengths", quantizeLengthCheck->isChecked());
+        settings.setValue("pianoroll/quantize/scaleSnap", scaleCheck->isChecked());
+        settings.setValue("pianoroll/quantize/scaleRoot", rootCombo->currentText());
+        settings.setValue("pianoroll/quantize/scaleMode", modeCombo->currentText());
         dlg->accept();
 
         auto* um = &primaryClip_->edit.getUndoManager();
@@ -750,18 +808,13 @@ void NoteGrid::showQuantizeDialog()
         for (auto* item : noteItems_) {
             if (hasSelection && !item->isSelected()) continue;
             auto* note = item->note();
-            double orig = note->getStartBeat().inBeats();
-            double snapped = std::round(orig / grid) * grid;
-            double newBeat = orig + (snapped - orig) * strength;
-
-            double len = note->getLengthBeats().inBeats();
-            if (quantizeLen) {
-                double snappedLen = std::max(grid, std::round(len / grid) * grid);
-                len = len + (snappedLen - len) * strength;
-            }
-            note->setStartAndLength(
-                tracktion::BeatPosition::fromBeats(newBeat),
-                tracktion::BeatDuration::fromBeats(std::max(0.03125, len)), um);
+            const auto after = Quantize::apply({ note->getNoteNumber(),
+                                                 note->getStartBeat().inBeats(),
+                                                 note->getLengthBeats().inBeats() }, options);
+            note->setStartAndLength(tracktion::BeatPosition::fromBeats(after.startBeat),
+                                    tracktion::BeatDuration::fromBeats(after.lengthBeats), um);
+            if (after.pitch != note->getNoteNumber())
+                note->setNoteNumber(after.pitch, um);
         }
         rebuildNotes();
         emit notesChanged();
