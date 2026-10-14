@@ -14,9 +14,15 @@
 #include <QGroupBox>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLineEdit>
+#include <QNetworkAccessManager>
+#include <QNetworkReply>
 #include <QPushButton>
 #include <QSettings>
+#include <QSignalBlocker>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -43,6 +49,15 @@ const ModelChoice kModels[] = {
     { "Claude Opus 4.8",                     "claude-opus-4-8" },
     { "Claude Sonnet 4.6",                   "claude-sonnet-4-6" },
     { "Claude Haiku 4.5",                    "claude-haiku-4-5" },
+};
+
+// Common local servers and their default OpenAI-compatible endpoints.
+struct ServerPreset { const char* label; const char* url; };
+const ServerPreset kServerPresets[] = {
+    { "Ollama",                 "http://localhost:11434/v1" },
+    { "LM Studio",              "http://localhost:1234/v1" },
+    { "llama.cpp server",       "http://localhost:8080/v1" },
+    { "Hugging Face TGI",       "http://localhost:8080/v1" },
 };
 
 struct EffortChoice { const char* label; const char* id; };
@@ -180,6 +195,15 @@ QWidget* SettingsDialog::createAiPage()
     auto* layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 0);
 
+    auto* providerRow = new QFormLayout();
+    auto* providerCombo = new QComboBox(page);
+    providerCombo->setAccessibleName("AI provider");
+    providerCombo->addItem("Claude (Anthropic API)", QString("anthropic"));
+    providerCombo->addItem("Local server (Ollama, LM Studio, ...)", QString("local"));
+    providerCombo->setCurrentIndex(std::max(0, providerCombo->findData(AiService::provider())));
+    providerRow->addRow("Provider:", providerCombo);
+    layout->addLayout(providerRow);
+
     auto* group = new QGroupBox("Claude", page);
     auto* form = new QFormLayout(group);
 
@@ -243,23 +267,159 @@ QWidget* SettingsDialog::createAiPage()
         AiService::setEffort(effortCombo->currentData().toString());
     });
 
-    auto* confirmCheck = new QCheckBox("Confirm destructive actions", group);
+    form->addRow(makeNote(
+        "Get an API key at console.anthropic.com. The key is stored in this "
+        "computer's OpenDaw settings.", group));
+    layout->addWidget(group);
+
+    // ── Local server ──
+    auto* localGroup = new QGroupBox("Local Server", page);
+    auto* localForm = new QFormLayout(localGroup);
+
+    auto* presetCombo = new QComboBox(localGroup);
+    presetCombo->setAccessibleName("Local server preset");
+    for (const auto& preset : kServerPresets)
+        presetCombo->addItem(preset.label, QString(preset.url));
+    presetCombo->addItem("Custom", QString());
+    localForm->addRow("Server:", presetCombo);
+
+    auto* urlEdit = new QLineEdit(AiService::localBaseUrl(), localGroup);
+    urlEdit->setAccessibleName("Local server address");
+    urlEdit->setPlaceholderText("http://localhost:11434/v1");
+    localForm->addRow("Address:", urlEdit);
+    const int presetIdx = presetCombo->findData(AiService::localBaseUrl());
+    presetCombo->setCurrentIndex(presetIdx >= 0 ? presetIdx : presetCombo->count() - 1);
+
+    auto* localModel = new QComboBox(localGroup);
+    localModel->setAccessibleName("Local model");
+    localModel->setEditable(true);
+    localModel->setCurrentText(AiService::localModel());
+    localModel->lineEdit()->setPlaceholderText("e.g. qwen3:8b");
+    auto* refreshBtn = new QPushButton("Refresh", localGroup);
+    refreshBtn->setToolTip("List the models installed on the server");
+    auto* modelRow = new QHBoxLayout();
+    modelRow->addWidget(localModel, 1);
+    modelRow->addWidget(refreshBtn);
+    localForm->addRow("Model:", modelRow);
+
+    auto* localKey = new QLineEdit(AiService::localApiKey(), localGroup);
+    localKey->setAccessibleName("Local server API key");
+    localKey->setEchoMode(QLineEdit::Password);
+    localKey->setPlaceholderText("Usually not needed");
+    localForm->addRow("API Key:", localKey);
+
+    auto* toolsCheck = new QCheckBox("Let the model edit the project (DAW tools)", localGroup);
+    toolsCheck->setAccessibleName("Use DAW tools with local models");
+    toolsCheck->setChecked(AiService::localUseTools());
+    toolsCheck->setToolTip("Turn off for models without tool-calling support; "
+                           "the assistant is then chat-only.");
+    localForm->addRow("", toolsCheck);
+
+    auto* localStatus = new QLabel(localGroup);
+    localStatus->setAccessibleName("Local server status");
+    localStatus->setWordWrap(true);
+    localForm->addRow("", localStatus);
+    localForm->addRow(makeNote(
+        "Works with any server that speaks the OpenAI chat API. Hugging Face "
+        "models can be run through these, for example "
+        "\"ollama pull hf.co/<user>/<repo>\" for GGUF models. Small models may "
+        "handle the DAW tools poorly; larger models with tool-calling support "
+        "work best.", localGroup));
+    layout->addWidget(localGroup);
+
+    connect(presetCombo, &QComboBox::activated, this, [presetCombo, urlEdit]() {
+        const QString url = presetCombo->currentData().toString();
+        if (url.isEmpty()) {
+            urlEdit->setFocus();
+            return;
+        }
+        urlEdit->setText(url);
+        AiService::setLocalBaseUrl(url);
+    });
+    connect(urlEdit, &QLineEdit::editingFinished, this, [presetCombo, urlEdit]() {
+        AiService::setLocalBaseUrl(urlEdit->text().trimmed());
+        const int idx = presetCombo->findData(urlEdit->text().trimmed());
+        presetCombo->setCurrentIndex(idx >= 0 ? idx : presetCombo->count() - 1);
+    });
+    connect(localModel, &QComboBox::currentTextChanged, this, [](const QString& text) {
+        AiService::setLocalModel(text.trimmed());
+    });
+    connect(localKey, &QLineEdit::editingFinished, this, [localKey]() {
+        AiService::setLocalApiKey(localKey->text().trimmed());
+    });
+    connect(toolsCheck, &QCheckBox::toggled, this, &AiService::setLocalUseTools);
+
+    // Lists the server's models via GET <address>/models.
+    auto* nam = new QNetworkAccessManager(page);
+    connect(refreshBtn, &QPushButton::clicked, this,
+            [nam, urlEdit, localKey, localModel, localStatus]() {
+        QString base = urlEdit->text().trimmed();
+        while (base.endsWith('/')) base.chop(1);
+        QNetworkRequest request{QUrl(base + "/models")};
+        if (!localKey->text().trimmed().isEmpty())
+            request.setRawHeader("Authorization", ("Bearer " + localKey->text().trimmed()).toUtf8());
+        request.setTransferTimeout(5000);
+        localStatus->setText("Connecting...");
+
+        auto* reply = nam->get(request);
+        QObject::connect(reply, &QNetworkReply::finished, localStatus,
+                         [reply, localModel, localStatus, base]() {
+            reply->deleteLater();
+            if (reply->error() != QNetworkReply::NoError) {
+                localStatus->setText(QString("Could not reach %1 (%2). Is the server running?")
+                                         .arg(base, reply->errorString()));
+                return;
+            }
+            QStringList models;
+            for (const auto& val : QJsonDocument::fromJson(reply->readAll())
+                                       .object()["data"].toArray())
+                models << val.toObject()["id"].toString();
+            models.removeAll(QString());
+            models.sort(Qt::CaseInsensitive);
+
+            const QString current = localModel->currentText();
+            QSignalBlocker block(localModel);
+            localModel->clear();
+            localModel->addItems(models);
+            localModel->setCurrentText(current.isEmpty() && !models.isEmpty() ? models.first()
+                                                                             : current);
+            AiService::setLocalModel(localModel->currentText().trimmed());
+            localStatus->setText(models.isEmpty()
+                ? QString("Connected, but the server reports no models.")
+                : QString("Connected: %1 model(s) available.").arg(models.size()));
+        });
+    });
+
+    // ── Behaviour (both providers) ──
+    auto* behaviourGroup = new QGroupBox("Behaviour", page);
+    auto* behaviourForm = new QFormLayout(behaviourGroup);
+
+    auto* confirmCheck = new QCheckBox("Confirm destructive actions", behaviourGroup);
     confirmCheck->setAccessibleName("Confirm destructive actions");
     confirmCheck->setChecked(AiService::confirmDestructive());
-    form->addRow("", confirmCheck);
+    behaviourForm->addRow("", confirmCheck);
     connect(confirmCheck, &QCheckBox::toggled, this, &AiService::setConfirmDestructive);
 
-    auto* previewCheck = new QCheckBox("Preview mix/master plan before applying changes", group);
+    auto* previewCheck = new QCheckBox("Preview mix/master plan before applying changes", behaviourGroup);
     previewCheck->setAccessibleName("Preview mix master plan");
     previewCheck->setChecked(AiService::previewMixPlanMode());
-    form->addRow("", previewCheck);
+    behaviourForm->addRow("", previewCheck);
     connect(previewCheck, &QCheckBox::toggled, this, &AiService::setPreviewMixPlanMode);
-
-    layout->addWidget(group);
-    layout->addWidget(makeNote(
-        "Get an API key at console.anthropic.com. The key is stored in this "
-        "computer's OpenDaw settings.", page));
+    layout->addWidget(behaviourGroup);
     layout->addStretch();
+
+    auto showProvider = [group, localGroup, providerCombo, refreshBtn]() {
+        const bool local = providerCombo->currentData().toString() == "local";
+        group->setVisible(!local);
+        localGroup->setVisible(local);
+        if (local) refreshBtn->click();
+    };
+    connect(providerCombo, &QComboBox::activated, this, [providerCombo, showProvider]() {
+        AiService::setProvider(providerCombo->currentData().toString());
+        showProvider();
+    });
+    showProvider();
+
     return page;
 }
 
