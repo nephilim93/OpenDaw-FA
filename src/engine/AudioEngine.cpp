@@ -9,9 +9,33 @@ namespace {
 // setDefaultAudioDevice() narrows it to stereo. Through PipeWire's ALSA
 // plugin that is 128 capture channels, which crashes PipeWire's converter.
 // Skip the automatic open; setDefaultAudioDevice() opens the device instead.
+//
+// PipeWire's "default" device also reports 128 channel names while only the
+// opened ones reach the audio callback, so describe wave devices for the
+// active channels only. Otherwise Tracktion creates inputs for channels that
+// never arrive and asserts on every audio block.
 class OpenDawEngineBehaviour : public te::EngineBehaviour {
 public:
     bool autoInitialiseDeviceManager() override { return false; }
+
+    bool isDescriptionOfWaveDevicesSupported() override { return true; }
+
+    void describeWaveDevices(std::vector<te::WaveDeviceDescription>& descriptions,
+                             juce::AudioIODevice& device, bool isInput) override
+    {
+        auto names = isInput ? device.getInputChannelNames() : device.getOutputChannelNames();
+        auto active = isInput ? device.getActiveInputChannels() : device.getActiveOutputChannels();
+        int numChannels = juce::jmin(active.countNumberOfSetBits(), names.size());
+
+        juce::String prefix = isInput ? "Input " : "Output ";
+        for (int i = 0; i < numChannels; i += 2) {
+            if (i + 1 < numChannels)
+                descriptions.emplace_back(prefix + juce::String(i + 1) + " + " + juce::String(i + 2),
+                                          i, i + 1, true);
+            else
+                descriptions.emplace_back(prefix + juce::String(i + 1), i, -1, true);
+        }
+    }
 };
 }
 #endif
