@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include <QWidget>
+#include <cmath>
 #include <functional>
 
 namespace OpenDaw {
@@ -17,7 +18,10 @@ public:
     void setScrollX(double sx) { scrollX_ = sx; update(); }
     void setBpm(double bpm) { bpm_ = bpm; update(); }
     void setTimeSig(int num, int den) { timeSigNum_ = num; timeSigDen_ = den; update(); }
-    void setPlayheadBeat(double beat) { playheadBeat_ = beat; update(); }
+    void setPlayheadBeat(double beat) {
+        if (std::abs(beat - playheadBeat_) < 1e-6) return;
+        playheadBeat_ = beat; update();
+    }
 
     void setLoopRegion(double inBeat, double outBeat);
     void setLoopEnabled(bool enabled);
