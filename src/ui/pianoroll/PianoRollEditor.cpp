@@ -480,6 +480,10 @@ PianoRollEditor::PianoRollEditor(QWidget* parent)
             this, [this]() { editModeBtn_->setChecked(true); });
     connect(noteGrid_, &NoteGrid::drawModeRequested,
             this, [this]() { drawModeBtn_->setChecked(true); });
+    connect(noteGrid_, &NoteGrid::noteSelectionChanged, this, [this]() {
+        const auto notes = noteGrid_->selectedNotes();
+        velocityLane_->setSelectedNotes({ notes.begin(), notes.end() });
+    });
     connect(velocityLane_, &VelocityLane::velocityChanged,
             this, [this]() { noteGrid_->rebuildNotes(); });
     connect(ccLane_, &CcLane::ccDataChanged,

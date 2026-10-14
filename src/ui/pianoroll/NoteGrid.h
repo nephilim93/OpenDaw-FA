@@ -68,6 +68,7 @@ public:
     void deleteSelectedNotes();
     void selectAllNotes();
     void deselectAllNotes();
+    std::vector<te::MidiNote*> selectedNotes() const;
     void scrollToMidiNote(int midiNote);
 
     // Clipboard
@@ -112,6 +113,7 @@ public:
 
 signals:
     void notesChanged();
+    void noteSelectionChanged();
     void zoomChanged();
     void verticalScrollChanged(int value);
     void horizontalScrollChanged(int value);
