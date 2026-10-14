@@ -64,6 +64,10 @@ void NoteItem::paint(QPainter* painter,
 {
     auto& theme = ThemeManager::instance().current();
     QRectF r = rect();
+    // Leave a 1px gap at the end so back-to-back notes (e.g. the two halves
+    // of a split) read as separate notes. Visual only; the hit area is unchanged.
+    if (r.width() > 4.0)
+        r.setRight(r.right() - 1.0);
 
     QColor baseColor = channelColor(channelNumber_);
     QColor color;

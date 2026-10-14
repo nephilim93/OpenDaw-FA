@@ -44,7 +44,10 @@ class NoteGrid : public QGraphicsView {
 public:
     enum class EditMode {
         Draw = 0,
-        Edit = 1
+        Edit = 1,
+        Erase = 2,
+        Split = 3,
+        Glue = 4
     };
 
     explicit NoteGrid(QWidget* parent = nullptr);
@@ -127,6 +130,7 @@ protected:
     void mouseMoveEvent(QMouseEvent* event) override;
     void mouseReleaseEvent(QMouseEvent* event) override;
     void wheelEvent(QWheelEvent* event) override;
+    void leaveEvent(QEvent* event) override;
     void keyPressEvent(QKeyEvent* event) override;
     void keyReleaseEvent(QKeyEvent* event) override;
     void contextMenuEvent(QContextMenuEvent* event) override;
@@ -142,6 +146,15 @@ private:
     void clearDrawPreview();
     QString midiNoteName(int midiNote) const;
     void updateDrawPreviewAppearance();
+
+    // Eraser / split / glue tools
+    NoteItem* noteItemAt(const QPointF& scenePos) const;
+    void eraseNoteAt(const QPointF& scenePos);
+    void splitNoteAt(const QPointF& scenePos);
+    bool splitTargetAt(const QPointF& scenePos, NoteItem*& item, double& splitOffset) const;
+    void updateSplitIndicator(const QPointF& scenePos);
+    void hideSplitIndicator();
+    void glueNoteAt(const QPointF& scenePos);
 
     // Musical typing helpers
     int musicalTypingKeyToPitch(int qtKey) const;
@@ -168,6 +181,8 @@ private:
     bool initialVerticalScrollSet_ = false;
 
     EditMode editMode_ = EditMode::Edit;
+    bool isErasing_ = false;
+    QGraphicsLineItem* splitIndicator_ = nullptr;
     bool isDrawingNote_ = false;
     int drawPitch_ = 60;
     int drawVelocity_ = 100;

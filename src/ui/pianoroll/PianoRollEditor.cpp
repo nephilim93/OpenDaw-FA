@@ -79,32 +79,30 @@ PianoRollEditor::PianoRollEditor(QWidget* parent)
         "QPushButton:hover { background: %3; }")
         .arg(theme.surfaceLight.name(), theme.accent.name(), theme.surfaceLight.name());
 
-    editModeBtn_ = new QPushButton(toolbar);
-    editModeBtn_->setAccessibleName("Edit Mode");
-    editModeBtn_->setCheckable(true);
-    editModeBtn_->setChecked(true);
-    editModeBtn_->setFont(faFont);
-    editModeBtn_->setText(QString(icons::fa::Pointer));
-    editModeBtn_->setToolTip("Edit mode (select & move)");
-    editModeBtn_->setFixedSize(btnSize, btnSize);
-    editModeBtn_->setStyleSheet(modeButtonStyle);
-    tbLayout->addWidget(editModeBtn_);
-
-    drawModeBtn_ = new QPushButton(toolbar);
-    drawModeBtn_->setAccessibleName("Draw Mode");
-    drawModeBtn_->setCheckable(true);
-    drawModeBtn_->setChecked(false);
-    drawModeBtn_->setFont(faFont);
-    drawModeBtn_->setText(QString(icons::fa::Pen));
-    drawModeBtn_->setToolTip("Draw mode (pencil)");
-    drawModeBtn_->setFixedSize(btnSize, btnSize);
-    drawModeBtn_->setStyleSheet(modeButtonStyle);
-    tbLayout->addWidget(drawModeBtn_);
-
-    connect(drawModeBtn_, &QPushButton::toggled,
-            this, &PianoRollEditor::onDrawModeToggled);
-    connect(editModeBtn_, &QPushButton::toggled,
-            this, &PianoRollEditor::onEditModeToggled);
+    struct ToolDef { EditTool tool; QFont font; QChar glyph; const char* tip; const char* name; };
+    const ToolDef toolDefs[] = {
+        { EditTool::Pointer, faFont, icons::fa::Pointer, "Pointer tool (select & move)", "Pointer Tool" },
+        { EditTool::Pen,     faFont, icons::fa::Pen,     "Pen tool (draw notes)",        "Pen Tool" },
+        { EditTool::Eraser,  faFont, icons::fa::Eraser,  "Eraser tool (click or drag to delete notes)", "Eraser Tool" },
+        { EditTool::Split,   faFont, icons::fa::Cutter,  "Split tool (click a note to cut it)", "Split Tool" },
+        { EditTool::Glue,    icons::materialIcons(iconSize), icons::mi::Link,
+          "Glue tool (join a note with the next one of the same pitch)", "Glue Tool" },
+    };
+    for (const auto& def : toolDefs) {
+        auto* btn = new QPushButton(toolbar);
+        btn->setAccessibleName(def.name);
+        btn->setCheckable(true);
+        btn->setFont(def.font);
+        btn->setText(QString(def.glyph));
+        btn->setToolTip(def.tip);
+        btn->setFixedSize(btnSize, btnSize);
+        btn->setStyleSheet(modeButtonStyle);
+        tbLayout->addWidget(btn);
+        toolButtons_[def.tool] = btn;
+        connect(btn, &QPushButton::clicked, this, [tool = def.tool]() {
+            EditToolState::instance().setTool(tool);
+        });
+    }
 
     // Separator
     auto* sep1 = new QFrame(toolbar);
@@ -477,9 +475,9 @@ PianoRollEditor::PianoRollEditor(QWidget* parent)
         return ensureClipForActiveChannel();
     });
     connect(noteGrid_, &NoteGrid::editModeRequested,
-            this, [this]() { editModeBtn_->setChecked(true); });
+            this, []() { EditToolState::instance().setTool(EditTool::Pointer); });
     connect(noteGrid_, &NoteGrid::drawModeRequested,
-            this, [this]() { drawModeBtn_->setChecked(true); });
+            this, []() { EditToolState::instance().setTool(EditTool::Pen); });
     connect(velocityLane_, &VelocityLane::velocityChanged,
             this, [this]() { noteGrid_->rebuildNotes(); });
     connect(ccLane_, &CcLane::ccDataChanged,
@@ -560,7 +558,10 @@ PianoRollEditor::PianoRollEditor(QWidget* parent)
     });
 
     onSnapModeChanged(6);
-    noteGrid_->setEditMode(NoteGrid::EditMode::Edit);
+
+    connect(&EditToolState::instance(), &EditToolState::toolChanged,
+            this, &PianoRollEditor::applyTool);
+    applyTool(EditToolState::instance().tool());
 }
 
 void PianoRollEditor::setClip(te::MidiClip* clip, EditManager* editMgr)
@@ -703,30 +704,18 @@ void PianoRollEditor::onSnapModeChanged(int index)
         noteGrid_->snapper().setMode(mapping[index]);
 }
 
-void PianoRollEditor::onDrawModeToggled(bool checked)
+void PianoRollEditor::applyTool(EditTool tool)
 {
-    if (!checked) {
-        if (!editModeBtn_->isChecked())
-            editModeBtn_->setChecked(true);
-        return;
+    for (auto& [t, btn] : toolButtons_)
+        btn->setChecked(t == tool);
+
+    switch (tool) {
+    case EditTool::Pointer: noteGrid_->setEditMode(NoteGrid::EditMode::Edit);  break;
+    case EditTool::Pen:     noteGrid_->setEditMode(NoteGrid::EditMode::Draw);  break;
+    case EditTool::Eraser:  noteGrid_->setEditMode(NoteGrid::EditMode::Erase); break;
+    case EditTool::Split:   noteGrid_->setEditMode(NoteGrid::EditMode::Split); break;
+    case EditTool::Glue:    noteGrid_->setEditMode(NoteGrid::EditMode::Glue);  break;
     }
-
-    if (editModeBtn_->isChecked())
-        editModeBtn_->setChecked(false);
-    noteGrid_->setEditMode(NoteGrid::EditMode::Draw);
-}
-
-void PianoRollEditor::onEditModeToggled(bool checked)
-{
-    if (!checked) {
-        if (!drawModeBtn_->isChecked())
-            drawModeBtn_->setChecked(true);
-        return;
-    }
-
-    if (drawModeBtn_->isChecked())
-        drawModeBtn_->setChecked(false);
-    noteGrid_->setEditMode(NoteGrid::EditMode::Edit);
 }
 
 void PianoRollEditor::onNotesChanged()
