@@ -57,6 +57,7 @@ protected:
     void hoverMoveEvent(QGraphicsSceneHoverEvent* event) override;
 
 private:
+    void addPointAt(const QPointF& local);
     void clearPointItems();
     void rebuildPointItems();
     QVector<EnvelopePoint> getPointsFromCurve() const;

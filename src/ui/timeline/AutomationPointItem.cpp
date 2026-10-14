@@ -3,6 +3,7 @@
 #include "EnvelopeUtils.h"
 #include "GridSnapper.h"
 #include "utils/ThemeManager.h"
+#include "ui/tools/EditToolState.h"
 #include <QPainter>
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsSceneContextMenuEvent>
@@ -68,7 +69,8 @@ void AutomationPointItem::hoverEnterEvent(QGraphicsSceneHoverEvent*)
 {
     hovered_ = true;
     prepareGeometryChange();
-    setCursor(Qt::SizeAllCursor);
+    setCursor(EditToolState::instance().tool() == EditTool::Pen ? Qt::CrossCursor
+                                                                : Qt::SizeAllCursor);
     update();
 }
 
@@ -82,6 +84,12 @@ void AutomationPointItem::hoverLeaveEvent(QGraphicsSceneHoverEvent*)
 
 void AutomationPointItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
 {
+    // With Pen the lane underneath draws over points; let the press through.
+    if (EditToolState::instance().tool() == EditTool::Pen) {
+        event->ignore();
+        return;
+    }
+
     if (event->button() == Qt::LeftButton && param_ && lane_) {
         bool ctrlHeld = (event->modifiers() & Qt::ControlModifier);
         bool shiftHeld = (event->modifiers() & Qt::ShiftModifier);
