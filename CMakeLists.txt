@@ -133,6 +133,7 @@ set(OpenDaw_SOURCES
     src/ai/AiToolDefs.h            src/ai/AiToolDefs.cpp
     src/ai/AiToolExecutor.h        src/ai/AiToolExecutor.cpp
     src/ai/AiService.h             src/ai/AiService.cpp
+    src/ai/AiOpenAiCompat.h src/ai/AiOpenAiCompat.cpp
     src/ai/AiChatStore.h           src/ai/AiChatStore.cpp
     src/ai/AiChatWidget.h          src/ai/AiChatWidget.cpp
     src/ai/AiQuickPrompt.h         src/ai/AiQuickPrompt.cpp

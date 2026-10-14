@@ -101,6 +101,27 @@ void AiService::setPreviewMixPlanMode(bool enabled)
     s.setValue("ai/previewMixPlanMode", enabled);
 }
 
+QString AiService::provider()
+{
+    return QSettings().value("ai/provider", "anthropic").toString();
+}
+void AiService::setProvider(const QString& provider) { QSettings().setValue("ai/provider", provider); }
+
+QString AiService::localBaseUrl()
+{
+    return QSettings().value("ai/localBaseUrl", "http://localhost:11434/v1").toString();
+}
+void AiService::setLocalBaseUrl(const QString& url) { QSettings().setValue("ai/localBaseUrl", url); }
+
+QString AiService::localModel() { return QSettings().value("ai/localModel").toString(); }
+void AiService::setLocalModel(const QString& model) { QSettings().setValue("ai/localModel", model); }
+
+QString AiService::localApiKey() { return QSettings().value("ai/localApiKey").toString(); }
+void AiService::setLocalApiKey(const QString& key) { QSettings().setValue("ai/localApiKey", key); }
+
+bool AiService::localUseTools() { return QSettings().value("ai/localUseTools", true).toBool(); }
+void AiService::setLocalUseTools(bool enabled) { QSettings().setValue("ai/localUseTools", enabled); }
+
 QString AiService::effort()
 {
     return QSettings().value("ai/effort", "high").toString();
@@ -283,6 +304,15 @@ void AiService::loadConversation(const QVector<AiMessage>& messages)
 
 void AiService::requestSessionTitle(const QString& userMessage)
 {
+    if (provider() == "local") {
+        QStringList words = userMessage.simplified().split(' ', Qt::SkipEmptyParts);
+        QString title = words.mid(0, 6).join(' ');
+        if (words.size() > 6) title += "...";
+        if (!title.isEmpty())
+            emit sessionTitleGenerated(title.left(60));
+        return;
+    }
+
     QString key = apiKey();
     if (key.isEmpty()) return;
 
@@ -340,8 +370,12 @@ void AiService::sendMessage(const QString& userText)
 {
     if (busy_) return;
 
-    QString key = apiKey();
-    if (key.isEmpty()) {
+    if (provider() == "local") {
+        if (localModel().isEmpty()) {
+            emit errorOccurred("No local model selected. Open Settings > AI Assistant to choose one.");
+            return;
+        }
+    } else if (apiKey().isEmpty()) {
         emit errorOccurred("No API key set. Open Settings > AI Assistant to add your Anthropic API key.");
         return;
     }
@@ -405,6 +439,12 @@ void AiService::sendToApi()
     currentBlockIndex_ = -1;
     currentStopReason_.clear();
     currentRefusalCategory_.clear();
+    localRequest_ = provider() == "local";
+
+    if (localRequest_) {
+        sendToLocalServer();
+        return;
+    }
 
     QJsonObject body;
     body["model"] = model();
@@ -434,6 +474,60 @@ void AiService::sendToApi()
             this, &AiService::handleStreamChunk);
     connect(currentReply_, &QNetworkReply::finished,
             this, &AiService::handleStreamFinished);
+}
+
+// ── Local (OpenAI-compatible) server ────────────────────────────────────────
+
+void AiService::sendToLocalServer()
+{
+    localStream_ = {};
+
+    QJsonObject body;
+    body["model"] = localModel();
+    body["stream"] = true;
+    body["messages"] = OpenAiCompat::toMessages(buildSystemPrompt(), conversationHistory_);
+    if (localUseTools())
+        body["tools"] = OpenAiCompat::toTools(AiToolDefs::allTools());
+
+    QString base = localBaseUrl().trimmed();
+    while (base.endsWith('/')) base.chop(1);
+    QNetworkRequest request{QUrl(base + "/chat/completions")};
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    if (!localApiKey().isEmpty())
+        request.setRawHeader("Authorization", ("Bearer " + localApiKey()).toUtf8());
+    // Local models can take a while to load before the first token.
+    request.setTransferTimeout(300000);
+
+    currentReply_ = nam_->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    connect(currentReply_, &QNetworkReply::readyRead,
+            this, &AiService::handleLocalStreamChunk);
+    connect(currentReply_, &QNetworkReply::finished,
+            this, &AiService::handleStreamFinished);
+}
+
+void AiService::handleLocalStreamChunk()
+{
+    if (!currentReply_) return;
+    streamBuffer_.append(currentReply_->readAll());
+
+    while (true) {
+        int nlPos = streamBuffer_.indexOf('\n');
+        if (nlPos < 0) break;
+
+        QByteArray line = streamBuffer_.left(nlPos).trimmed();
+        streamBuffer_.remove(0, nlPos + 1);
+        if (!line.startsWith("data:")) continue;
+
+        QByteArray jsonData = line.mid(5).trimmed();
+        if (jsonData == "[DONE]") continue;
+
+        auto doc = QJsonDocument::fromJson(jsonData);
+        if (!doc.isObject()) continue;
+
+        const QString text = OpenAiCompat::applyChunk(doc.object(), localStream_);
+        if (!text.isEmpty())
+            emit tokenReceived(text);
+    }
 }
 
 // ── SSE stream parsing ──────────────────────────────────────────────────────
@@ -551,10 +645,15 @@ void AiService::handleStreamFinished()
 
         auto doc = QJsonDocument::fromJson(responseBody);
         if (doc.isObject()) {
-            auto errObj = doc.object()["error"].toObject();
-            if (!errObj.isEmpty())
-                errorMsg = errObj["message"].toString();
+            const auto errVal = doc.object()["error"];
+            if (errVal.isObject() && !errVal.toObject()["message"].toString().isEmpty())
+                errorMsg = errVal.toObject()["message"].toString();
+            else if (errVal.isString())
+                errorMsg = errVal.toString();  // e.g. Ollama
         }
+        if (localRequest_ && currentReply_->error() == QNetworkReply::ConnectionRefusedError)
+            errorMsg = QString("Could not reach the local server at %1. Is it running?")
+                           .arg(localBaseUrl());
 
         emit errorOccurred(errorMsg);
         setBusy(false);
@@ -565,6 +664,18 @@ void AiService::handleStreamFinished()
 
     currentReply_->deleteLater();
     currentReply_ = nullptr;
+
+    if (localRequest_) {
+        currentContentBlocks_ = OpenAiCompat::toContentBlocks(localStream_);
+        // An empty assistant turn would be rejected if the chat later moves to
+        // Claude, so record that nothing came back.
+        if (currentContentBlocks_.isEmpty()) {
+            AiContentBlock block;
+            block.type = "text";
+            block.text = "(The model returned an empty response.)";
+            currentContentBlocks_.append(block);
+        }
+    }
 
     processAssistantResponse();
 }
