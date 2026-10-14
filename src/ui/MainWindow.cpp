@@ -336,6 +336,9 @@ void MainWindow::createMenus()
     fileMenu->addAction("&Open Project...", QKeySequence::Open, this,
         &MainWindow::onOpenProject);
 
+    recentMenu_ = fileMenu->addMenu("Open &Recent");
+    rebuildRecentMenu();
+
     fileMenu->addAction("&Save", QKeySequence::Save, this,
         &MainWindow::onSaveProject);
 
@@ -1012,12 +1015,7 @@ void MainWindow::onOpenProject()
         "Tracktion Edit (*.tracktionedit);;All Files (*)");
     if (path.isEmpty()) return;
 
-    settings.setValue("paths/lastFileDialogDir", QFileInfo(path).absolutePath());
-
-    juce::File file(juce::String(path.toUtf8().constData()));
-    editMgr_.loadEdit(file);
-    if (aiChatWidget_) aiChatWidget_->loadChatSessions();
-    updateWindowTitle();
+    openProjectFile(path);
 }
 
 void MainWindow::loadFile(const QString& path)
@@ -1026,13 +1024,86 @@ void MainWindow::loadFile(const QString& path)
     if (!fi.exists() || fi.suffix().toLower() != "tracktionedit")
         return;
 
+    openProjectFile(path);
+}
+
+bool MainWindow::openProjectFile(const QString& path)
+{
+    QFileInfo fi(path);
     juce::File file(juce::String(fi.absoluteFilePath().toUtf8().constData()));
-    editMgr_.loadEdit(file);
+    if (!editMgr_.loadEdit(file))
+        return false;
+
     if (aiChatWidget_) aiChatWidget_->loadChatSessions();
     updateWindowTitle();
 
     QSettings settings;
     settings.setValue("paths/lastFileDialogDir", fi.absolutePath());
+    addRecentProject(fi.absoluteFilePath());
+    return true;
+}
+
+// ── Recent projects ──────────────────────────────────────────────────────────
+
+static constexpr int kMaxRecentProjects = 10;
+static const char* kRecentProjectsKey = "recentProjects";
+
+void MainWindow::addRecentProject(const QString& path)
+{
+    QSettings settings;
+    QStringList recent = settings.value(kRecentProjectsKey).toStringList();
+    recent.removeAll(path);
+    recent.prepend(path);
+    while (recent.size() > kMaxRecentProjects)
+        recent.removeLast();
+    settings.setValue(kRecentProjectsKey, recent);
+    rebuildRecentMenu();
+}
+
+void MainWindow::rebuildRecentMenu()
+{
+    if (!recentMenu_) return;
+    recentMenu_->clear();
+
+    const QStringList recent = QSettings().value(kRecentProjectsKey).toStringList();
+    for (int i = 0; i < recent.size(); ++i) {
+        const QString path = recent[i];
+        const QFileInfo fi(path);
+        auto* action = recentMenu_->addAction(
+            QString("&%1  %2").arg((i + 1) % 10).arg(fi.completeBaseName()));
+        action->setToolTip(QDir::toNativeSeparators(path));
+        action->setStatusTip(QDir::toNativeSeparators(path));
+        connect(action, &QAction::triggered, this, [this, path]() {
+            if (!QFileInfo::exists(path)) {
+                QMessageBox::warning(this, "Open Recent",
+                    QString("The project could not be found:\n%1\n\n"
+                            "It has been removed from the recent list.")
+                        .arg(QDir::toNativeSeparators(path)));
+                QSettings settings;
+                QStringList list = settings.value(kRecentProjectsKey).toStringList();
+                list.removeAll(path);
+                settings.setValue(kRecentProjectsKey, list);
+                rebuildRecentMenu();
+                return;
+            }
+            if (!maybeSaveBeforeAction()) return;
+            if (!openProjectFile(path))
+                QMessageBox::warning(this, "Open Recent",
+                    QString("Could not open the project:\n%1")
+                        .arg(QDir::toNativeSeparators(path)));
+        });
+    }
+
+    if (recent.isEmpty()) {
+        recentMenu_->addAction("No Recent Projects")->setEnabled(false);
+        return;
+    }
+
+    recentMenu_->addSeparator();
+    recentMenu_->addAction("&Clear Recent Projects", this, [this]() {
+        QSettings().remove(kRecentProjectsKey);
+        rebuildRecentMenu();
+    });
 }
 
 void MainWindow::onSaveProject()
@@ -1063,7 +1134,8 @@ void MainWindow::onSaveProjectAs()
 
     if (routingView_) routingView_->flushNodePositions();
     juce::File file(juce::String(path.toUtf8().constData()));
-    editMgr_.saveEditAs(file);
+    if (editMgr_.saveEditAs(file))
+        addRecentProject(QFileInfo(path).absoluteFilePath());
     if (aiChatWidget_) aiChatWidget_->saveChatSessions();
     updateWindowTitle();
 }
