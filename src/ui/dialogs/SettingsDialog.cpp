@@ -21,6 +21,7 @@
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QPushButton>
+#include <QScrollArea>
 #include <QSettings>
 #include <QSignalBlocker>
 #include <QUrl>
@@ -112,7 +113,15 @@ SettingsDialog::SettingsDialog(AudioEngine& audio, EditManager& editMgr,
 void SettingsDialog::addPage(const QString& title, QWidget* page)
 {
     pageList_->addItem(title);
-    pages_->addWidget(page);
+
+    // Pages keep their natural height (wrapped labels included) and scroll
+    // vertically when they are taller than the dialog.
+    auto* scroll = new QScrollArea(pages_);
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setWidget(page);
+    pages_->addWidget(scroll);
 }
 
 void SettingsDialog::showPage(Page page)
