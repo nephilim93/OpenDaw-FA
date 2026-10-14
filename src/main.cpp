@@ -2,6 +2,8 @@
 #include <QDebug>
 #include <QFile>
 #include <QFileInfo>
+#include <QDir>
+#include <QStandardPaths>
 #include <QDateTime>
 #include <QTimer>
 #include <QIcon>
@@ -92,7 +94,18 @@ int main(int argc, char* argv[])
         "QToolTip { background: #3a3a3a; color: #dcdcdc; border: 1px solid #666; "
         "padding: 3px; font-size: 11px; }");
 
-    QFile lf(QApplication::applicationDirPath() + "/OpenDaw.log");
+    // Windows keeps the log next to the executable. Elsewhere the app folder
+    // is not the place for it: writing inside a macOS bundle breaks its code
+    // signature, and an AppImage's folder is read-only.
+#ifdef _WIN32
+    const QString logDir = QApplication::applicationDirPath();
+#elif defined(__APPLE__)
+    const QString logDir = QDir::homePath() + "/Library/Logs/OpenDaw";
+#else
+    const QString logDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+#endif
+    QDir().mkpath(logDir);
+    QFile lf(logDir + "/OpenDaw.log");
     if (lf.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
         logFile = &lf;
         qInstallMessageHandler(logMessageHandler);

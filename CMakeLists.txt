@@ -156,6 +156,22 @@ juce_generate_juce_header(OpenDaw)
 
 target_sources(OpenDaw PRIVATE ${OpenDaw_SOURCES})
 
+# ── macOS development signing ────────────────────────────────────────────────
+# Local builds are ad-hoc signed, so macOS treats every rebuild as a new app
+# and asks for microphone permission again. Set this to a code-signing
+# identity (name or SHA-1 from `security find-identity -v -p codesigning`)
+# to sign each build with it so permissions persist across rebuilds.
+# Empty by default; release builds are signed by the release workflow.
+set(OPENDAW_MACOS_SIGN_IDENTITY "" CACHE STRING
+    "macOS code-signing identity for local builds (empty = ad-hoc)")
+if(APPLE AND OPENDAW_MACOS_SIGN_IDENTITY)
+    add_custom_command(TARGET OpenDaw POST_BUILD
+        COMMAND codesign --force --sign "${OPENDAW_MACOS_SIGN_IDENTITY}"
+                --identifier "com.OpenDaw.app" "$<TARGET_BUNDLE_DIR:OpenDaw>"
+        COMMENT "Signing OpenDaw.app for local development"
+        VERBATIM)
+endif()
+
 # ── Windows application icon ─────────────────────────────────────────────────
 # JUCE's generated RC expects icon.ico next to OpenDaw_resources.rc
 if(WIN32)
