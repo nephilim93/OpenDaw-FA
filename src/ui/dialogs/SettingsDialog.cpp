@@ -26,6 +26,7 @@
 #include <QSignalBlocker>
 #include <QUrl>
 #include <QVBoxLayout>
+#include <memory>
 
 namespace OpenDaw {
 
@@ -333,7 +334,6 @@ QWidget* SettingsDialog::createAiPage()
     contextWarning->setAccessibleName("Local model context warning");
     contextWarning->setWordWrap(true);
     contextWarning->setTextInteractionFlags(Qt::TextSelectableByMouse);
-    contextWarning->setStyleSheet("color: #e0a030;");
     contextWarning->hide();
     localForm->addRow("", contextWarning);
     localForm->addRow(makeNote(
@@ -371,11 +371,15 @@ QWidget* SettingsDialog::createAiPage()
     // context window at /api/ps. A prompt longer than that window is cut
     // silently, and the model loses tools and instructions. Other servers,
     // and models that are not loaded yet, are skipped without a warning.
-    auto checkContext = [nam, urlEdit, localModel, toolsCheck, contextWarning]() {
+    // Several checks can be in flight (quick Refresh clicks); only the
+    // latest one may update the label.
+    auto latestCheck = std::make_shared<int>(0);
+    auto checkContext = [nam, urlEdit, localModel, toolsCheck, contextWarning, latestCheck]() {
         QString base = urlEdit->text().trimmed();
         while (base.endsWith('/')) base.chop(1);
         if (base.endsWith("/v1")) base.chop(3);
         const QString model = localModel->currentText().trimmed();
+        const int check = ++*latestCheck;
         if (model.isEmpty()) {
             contextWarning->hide();
             return;
@@ -385,12 +389,17 @@ QWidget* SettingsDialog::createAiPage()
         request.setTransferTimeout(5000);
         auto* reply = nam->get(request);
         QObject::connect(reply, &QNetworkReply::finished, contextWarning,
-                         [reply, model, toolsCheck, contextWarning]() {
+                         [reply, model, toolsCheck, contextWarning, latestCheck, check]() {
             reply->deleteLater();
-            contextWarning->hide();
-            if (reply->error() != QNetworkReply::NoError)
+            if (check != *latestCheck)
                 return;
+            // Not Ollama, or unreachable: nothing to check.
+            if (reply->error() != QNetworkReply::NoError) {
+                contextWarning->hide();
+                return;
+            }
 
+            const int recommended = AiService::recommendedLocalContext(toolsCheck->isChecked());
             for (const auto& val : QJsonDocument::fromJson(reply->readAll())
                                        .object()["models"].toArray()) {
                 const auto entry = val.toObject();
@@ -398,10 +407,12 @@ QWidget* SettingsDialog::createAiPage()
                     continue;
 
                 const int context = entry["context_length"].toInt();
-                const int recommended = AiService::recommendedLocalContext(toolsCheck->isChecked());
-                if (context <= 0 || context >= recommended)
+                if (context <= 0 || context >= recommended) {
+                    contextWarning->hide();
                     return;
+                }
 
+                contextWarning->setStyleSheet("color: #e0a030;");
                 contextWarning->setText(QString(
                     "%1 is loaded with a %2-token context, but OpenDaw needs about %3. "
                     "Longer prompts are cut off, so the model may ignore tools or "
@@ -411,6 +422,14 @@ QWidget* SettingsDialog::createAiPage()
                 contextWarning->show();
                 return;
             }
+
+            // Ollama only reports the context of loaded models.
+            contextWarning->setStyleSheet("color: gray;");
+            contextWarning->setText(QString(
+                "%1 is not loaded yet, so its context size can't be checked. "
+                "OpenDaw needs about %2 tokens; click Refresh after the first "
+                "message to check.").arg(model).arg(recommended));
+            contextWarning->show();
         });
     };
 
