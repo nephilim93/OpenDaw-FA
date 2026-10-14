@@ -122,6 +122,21 @@ void AiService::setLocalApiKey(const QString& key) { QSettings().setValue("ai/lo
 bool AiService::localUseTools() { return QSettings().value("ai/localUseTools", true).toBool(); }
 void AiService::setLocalUseTools(bool enabled) { QSettings().setValue("ai/localUseTools", enabled); }
 
+int AiService::recommendedLocalContext(bool withTools)
+{
+    // About 4 characters per token, plus 4096 tokens for the system prompt
+    // and the conversation, rounded up to a power of two as servers expect.
+    int needed = 4096;
+    if (withTools) {
+        const auto tools = OpenAiCompat::toTools(AiToolDefs::allTools());
+        needed += int(QJsonDocument(tools).toJson(QJsonDocument::Compact).size() / 4);
+    }
+    int context = 4096;
+    while (context < needed)
+        context *= 2;
+    return context;
+}
+
 QString AiService::effort()
 {
     return QSettings().value("ai/effort", "high").toString();
