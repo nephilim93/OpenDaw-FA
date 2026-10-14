@@ -19,6 +19,9 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QMessageBox>
+#include <QActionGroup>
+#include <map>
+#include "ui/tools/EditToolState.h"
 #include <QApplication>
 #include <QLineEdit>
 #include <QTextEdit>
@@ -603,17 +606,31 @@ void MainWindow::createToolBar()
         mainToolBar_->addAction(splitClipAction_);
     }
 
-    auto* pointerAction = mainToolBar_->addAction(
-        faIcon(icons::fa::Pointer), "Pointer Tool");
-    pointerAction->setToolTip("Pointer Tool");
-
-    auto* penAction = mainToolBar_->addAction(
-        faIcon(icons::fa::Pen), "Pen Tool");
-    penAction->setToolTip("Pen Tool");
-
-    auto* eraserAction = mainToolBar_->addAction(
-        faIcon(icons::fa::Eraser), "Eraser Tool");
-    eraserAction->setToolTip("Eraser Tool");
+    // Editing tools: one shared tool for the whole app (see EditToolState).
+    auto* toolGroup = new QActionGroup(this);
+    toolGroup->setExclusive(true);
+    struct ToolDef { EditTool tool; QIcon icon; const char* name; };
+    const ToolDef toolDefs[] = {
+        { EditTool::Pointer, faIcon(icons::fa::Pointer), "Pointer Tool" },
+        { EditTool::Pen,     faIcon(icons::fa::Pen),     "Pen Tool" },
+        { EditTool::Eraser,  faIcon(icons::fa::Eraser),  "Eraser Tool" },
+        { EditTool::Split,   faIcon(icons::fa::Cutter),  "Split Tool" },
+        { EditTool::Glue,    miIcon(icons::mi::Link),    "Glue Tool" },
+    };
+    std::map<EditTool, QAction*> toolActions;
+    for (const auto& def : toolDefs) {
+        auto* action = mainToolBar_->addAction(def.icon, def.name);
+        action->setToolTip(def.name);
+        action->setCheckable(true);
+        toolGroup->addAction(action);
+        toolActions[def.tool] = action;
+        connect(action, &QAction::triggered, this, [tool = def.tool]() {
+            EditToolState::instance().setTool(tool);
+        });
+    }
+    toolActions[EditToolState::instance().tool()]->setChecked(true);
+    connect(&EditToolState::instance(), &EditToolState::toolChanged, this,
+            [toolActions](EditTool tool) { toolActions.at(tool)->setChecked(true); });
 
     mainToolBar_->addSeparator();
 

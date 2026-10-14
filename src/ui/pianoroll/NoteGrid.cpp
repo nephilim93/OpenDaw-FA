@@ -121,6 +121,18 @@ void NoteGrid::setEditMode(EditMode mode)
                                             : QGraphicsView::NoDrag);
     if (editMode_ != EditMode::Draw)
         clearDrawPreview();
+    isErasing_ = false;
+    if (editMode_ != EditMode::Split)
+        hideSplitIndicator();
+    viewport()->setMouseTracking(true);  // split tool previews on hover
+
+    switch (editMode_) {
+    case EditMode::Edit:  viewport()->unsetCursor(); break;
+    case EditMode::Draw:  viewport()->setCursor(Qt::CrossCursor); break;
+    case EditMode::Erase: viewport()->setCursor(Qt::PointingHandCursor); break;
+    case EditMode::Split: viewport()->setCursor(Qt::SplitHCursor); break;
+    case EditMode::Glue:  viewport()->setCursor(Qt::PointingHandCursor); break;
+    }
 }
 
 void NoteGrid::updateSceneSize()
@@ -344,11 +356,38 @@ void NoteGrid::mousePressEvent(QMouseEvent* event)
         return;
     }
 
+    if (event->button() == Qt::LeftButton) {
+        const QPointF scenePos = mapToScene(event->pos());
+        switch (editMode_) {
+        case EditMode::Erase:
+            isErasing_ = true;
+            eraseNoteAt(scenePos);
+            event->accept();
+            return;
+        case EditMode::Split:
+            splitNoteAt(scenePos);
+            event->accept();
+            return;
+        case EditMode::Glue:
+            glueNoteAt(scenePos);
+            event->accept();
+            return;
+        default:
+            break;
+        }
+    }
+
     QGraphicsView::mousePressEvent(event);
 }
 
 void NoteGrid::mouseDoubleClickEvent(QMouseEvent* event)
 {
+    if (editMode_ == EditMode::Erase || editMode_ == EditMode::Split
+        || editMode_ == EditMode::Glue) {
+        mousePressEvent(event);
+        return;
+    }
+
     if (editMode_ == EditMode::Edit && event->button() == Qt::LeftButton) {
         QPointF scenePos = mapToScene(event->pos());
         const auto hitItems = scene_->items(scenePos);
@@ -378,6 +417,15 @@ void NoteGrid::mouseMoveEvent(QMouseEvent* event)
         return;
     }
 
+    if (editMode_ == EditMode::Erase && isErasing_) {
+        eraseNoteAt(mapToScene(event->pos()));
+        event->accept();
+        return;
+    }
+
+    if (editMode_ == EditMode::Split)
+        updateSplitIndicator(mapToScene(event->pos()));
+
     QGraphicsView::mouseMoveEvent(event);
 }
 
@@ -389,7 +437,19 @@ void NoteGrid::mouseReleaseEvent(QMouseEvent* event)
         return;
     }
 
+    if (editMode_ == EditMode::Erase && event->button() == Qt::LeftButton) {
+        isErasing_ = false;
+        event->accept();
+        return;
+    }
+
     QGraphicsView::mouseReleaseEvent(event);
+}
+
+void NoteGrid::leaveEvent(QEvent* event)
+{
+    hideSplitIndicator();
+    QGraphicsView::leaveEvent(event);
 }
 
 void NoteGrid::wheelEvent(QWheelEvent* event)
@@ -1300,6 +1360,164 @@ void NoteGrid::showEvent(QShowEvent* event)
         initialVerticalScrollSet_ = true;
         emit verticalScrollChanged(verticalScrollBar()->value());
     }
+}
+
+// ── Eraser / split / glue tools ──────────────────────────────────────
+
+NoteItem* NoteGrid::noteItemAt(const QPointF& scenePos) const
+{
+    for (auto* item : scene_->items(scenePos))
+        if (auto* noteItem = dynamic_cast<NoteItem*>(item))
+            return noteItem;
+    return nullptr;
+}
+
+void NoteGrid::eraseNoteAt(const QPointF& scenePos)
+{
+    auto* item = noteItemAt(scenePos);
+    if (!item) return;
+
+    auto* um = &item->clip()->edit.getUndoManager();
+    item->clip()->getSequence().removeNote(*item->note(), um);
+
+    rebuildNotes();
+    emit notesChanged();
+}
+
+// Finds the note under scenePos and where within it (in beats from its
+// start) a split would land. Shared by the hover indicator and the split.
+bool NoteGrid::splitTargetAt(const QPointF& scenePos, NoteItem*& item,
+                             double& splitOffset) const
+{
+    item = noteItemAt(scenePos);
+    if (!item) return false;
+
+    const double length = item->note()->getLengthBeats().inBeats();
+
+    // The item is drawn at (note start + clip offset), so convert the snapped
+    // scene position into a beat within the note's own sequence.
+    const double itemStartBeat = item->pos().x() / pixelsPerBeat_;
+    splitOffset = snapper_.snapBeat(scenePos.x() / pixelsPerBeat_) - itemStartBeat;
+    constexpr double minPart = 1.0 / 64.0;
+
+    // Notes no longer than one grid step have no grid line inside them, so
+    // split those at the exact mouse position instead.
+    const double grid = snapper_.gridIntervalBeats();
+    if (grid <= 0.0 || length <= grid)
+        splitOffset = scenePos.x() / pixelsPerBeat_ - itemStartBeat;
+    return splitOffset >= minPart && splitOffset <= length - minPart;
+}
+
+void NoteGrid::updateSplitIndicator(const QPointF& scenePos)
+{
+    NoteItem* item = nullptr;
+    double splitOffset = 0.0;
+    if (!splitTargetAt(scenePos, item, splitOffset)) {
+        hideSplitIndicator();
+        return;
+    }
+
+    if (!splitIndicator_) {
+        QPen pen(ThemeManager::instance().current().accent, 2);
+        pen.setCosmetic(true);
+        splitIndicator_ = scene_->addLine(QLineF(), pen);
+        splitIndicator_->setZValue(4);
+    }
+
+    const double x = item->pos().x() + splitOffset * pixelsPerBeat_;
+    const double top = item->pos().y() - 3.0;
+    const double bottom = item->pos().y() + item->rect().height() + 3.0;
+    splitIndicator_->setLine(x, top, x, bottom);
+    splitIndicator_->show();
+}
+
+void NoteGrid::hideSplitIndicator()
+{
+    if (splitIndicator_)
+        splitIndicator_->hide();
+}
+
+void NoteGrid::splitNoteAt(const QPointF& scenePos)
+{
+    NoteItem* item = nullptr;
+    double splitOffset = 0.0;
+    if (!splitTargetAt(scenePos, item, splitOffset)) return;
+
+    auto* note = item->note();
+    const double start = note->getStartBeat().inBeats();
+    const double length = note->getLengthBeats().inBeats();
+
+    auto* clip = item->clip();
+    auto* um = &clip->edit.getUndoManager();
+    um->beginNewTransaction("Split Note");
+
+    clip->getSequence().addNote(note->getNoteNumber(),
+                                tracktion::BeatPosition::fromBeats(start + splitOffset),
+                                tracktion::BeatDuration::fromBeats(length - splitOffset),
+                                note->getVelocity(), note->getColour(), um);
+    note->setStartAndLength(tracktion::BeatPosition::fromBeats(start),
+                            tracktion::BeatDuration::fromBeats(splitOffset), um);
+
+    rebuildNotes();
+    emit notesChanged();
+    updateSplitIndicator(scenePos);
+}
+
+void NoteGrid::glueNoteAt(const QPointF& scenePos)
+{
+    auto* item = noteItemAt(scenePos);
+    if (!item) return;
+
+    // Clicking one of several selected notes glues the selection: each run of
+    // same-pitch notes in a clip becomes a single note. Otherwise the clicked
+    // note is joined with the next note of the same pitch.
+    std::map<std::pair<te::MidiClip*, int>, std::vector<te::MidiNote*>> groups;
+    int selectedCount = 0;
+    for (auto* ni : noteItems_)
+        if (ni->isSelected()) ++selectedCount;
+
+    if (item->isSelected() && selectedCount > 1) {
+        for (auto* ni : noteItems_)
+            if (ni->isSelected())
+                groups[{ ni->clip(), ni->note()->getNoteNumber() }].push_back(ni->note());
+    } else {
+        auto* clicked = item->note();
+        te::MidiNote* next = nullptr;
+        for (auto* n : item->clip()->getSequence().getNotes()) {
+            if (n == clicked || n->getNoteNumber() != clicked->getNoteNumber()) continue;
+            if (n->getStartBeat() < clicked->getStartBeat()) continue;
+            if (!next || n->getStartBeat() < next->getStartBeat())
+                next = n;
+        }
+        if (!next) return;
+        groups[{ item->clip(), clicked->getNoteNumber() }] = { clicked, next };
+    }
+
+    auto* um = &item->clip()->edit.getUndoManager();
+    um->beginNewTransaction("Glue Notes");
+
+    bool changed = false;
+    for (auto& [key, notes] : groups) {
+        if (notes.size() < 2) continue;
+        std::sort(notes.begin(), notes.end(), [](auto* a, auto* b) {
+            return a->getStartBeat() < b->getStartBeat();
+        });
+
+        auto* first = notes.front();
+        auto end = first->getEndBeat();
+        for (auto* n : notes)
+            end = std::max(end, n->getEndBeat());
+
+        first->setStartAndLength(first->getStartBeat(), end - first->getStartBeat(), um);
+        auto& seq = key.first->getSequence();
+        for (size_t i = 1; i < notes.size(); ++i)
+            seq.removeNote(*notes[i], um);
+        changed = true;
+    }
+
+    if (!changed) return;
+    rebuildNotes();
+    emit notesChanged();
 }
 
 // ── Draw preview ──────────────────────────────────────────────────────

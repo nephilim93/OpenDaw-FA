@@ -5,6 +5,7 @@
 #include "VelocityLane.h"
 #include "CcLane.h"
 #include "PianoRollRuler.h"
+#include "ui/tools/EditToolState.h"
 #include <QWidget>
 #include <QLabel>
 #include <QComboBox>
@@ -14,6 +15,7 @@
 #include <QScrollArea>
 #include <QVBoxLayout>
 #include <tracktion_engine/tracktion_engine.h>
+#include <map>
 #include <vector>
 #include <set>
 
@@ -47,8 +49,7 @@ private:
     void syncKeyboardScroll();
     void syncLaneScroll();
     void onSnapModeChanged(int index);
-    void onDrawModeToggled(bool checked);
-    void onEditModeToggled(bool checked);
+    void applyTool(EditTool tool);
     void onNotesChanged();
     void onCcComboChanged(int index);
     void onChannelComboChanged(int index);
@@ -70,8 +71,7 @@ private:
     std::set<int> hiddenChannels_;
 
     QLabel* clipNameLabel_;
-    QPushButton* drawModeBtn_ = nullptr;
-    QPushButton* editModeBtn_ = nullptr;
+    std::map<EditTool, QPushButton*> toolButtons_;
     QPushButton* musicalTypingBtn_ = nullptr;
     QPushButton* stepRecordBtn_ = nullptr;
     QComboBox* snapCombo_;

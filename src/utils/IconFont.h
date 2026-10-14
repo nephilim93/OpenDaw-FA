@@ -133,6 +133,7 @@ namespace fa {
 namespace mi {
     inline const QChar Add               {0xE145};
     inline const QChar Delete            {0xE872};
+    inline const QChar Link              {0xE157};
     inline const QChar Folder            {0xE2C7};
     inline const QChar InsertDriveFile   {0xE24D};
     inline const QChar CreateNewFolder   {0xE2CC};

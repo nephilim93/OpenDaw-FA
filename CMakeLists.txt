@@ -110,6 +110,7 @@ set(OpenDaw_SOURCES
     src/ui/pianoroll/PianoRollEditor.h    src/ui/pianoroll/PianoRollEditor.cpp
     src/ui/pianoroll/PianoKeyboard.h      src/ui/pianoroll/PianoKeyboard.cpp
     src/ui/pianoroll/NoteGrid.h           src/ui/pianoroll/NoteGrid.cpp
+    src/ui/tools/EditToolState.h          src/ui/tools/EditToolState.cpp
     src/ui/pianoroll/NoteItem.h           src/ui/pianoroll/NoteItem.cpp
     src/ui/pianoroll/VelocityLane.h       src/ui/pianoroll/VelocityLane.cpp
     src/ui/pianoroll/CcLane.h             src/ui/pianoroll/CcLane.cpp
