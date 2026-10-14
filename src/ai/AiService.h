@@ -58,6 +58,9 @@ public:
     static void setLocalApiKey(const QString& key);
     static bool localUseTools();
     static void setLocalUseTools(bool enabled);
+    // Context window, in tokens, a local model needs for OpenDaw's system
+    // prompt, the conversation and, when enabled, the DAW tool definitions.
+    static int recommendedLocalContext(bool withTools);
 
     bool isBusy() const { return busy_; }
 

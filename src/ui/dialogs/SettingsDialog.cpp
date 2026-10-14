@@ -319,6 +319,14 @@ QWidget* SettingsDialog::createAiPage()
     localStatus->setAccessibleName("Local server status");
     localStatus->setWordWrap(true);
     localForm->addRow("", localStatus);
+
+    auto* contextWarning = new QLabel(localGroup);
+    contextWarning->setAccessibleName("Local model context warning");
+    contextWarning->setWordWrap(true);
+    contextWarning->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    contextWarning->setStyleSheet("color: #e0a030;");
+    contextWarning->hide();
+    localForm->addRow("", contextWarning);
     localForm->addRow(makeNote(
         "Works with any server that speaks the OpenAI chat API. Hugging Face "
         "models can be run through these, for example "
@@ -347,12 +355,65 @@ QWidget* SettingsDialog::createAiPage()
     connect(localKey, &QLineEdit::editingFinished, this, [localKey]() {
         AiService::setLocalApiKey(localKey->text().trimmed());
     });
-    connect(toolsCheck, &QCheckBox::toggled, this, &AiService::setLocalUseTools);
+
+    auto* nam = new QNetworkAccessManager(page);
+
+    // Ollama serves the OpenAI API under /v1 and reports each loaded model's
+    // context window at /api/ps. A prompt longer than that window is cut
+    // silently, and the model loses tools and instructions. Other servers,
+    // and models that are not loaded yet, are skipped without a warning.
+    auto checkContext = [nam, urlEdit, localModel, toolsCheck, contextWarning]() {
+        QString base = urlEdit->text().trimmed();
+        while (base.endsWith('/')) base.chop(1);
+        if (base.endsWith("/v1")) base.chop(3);
+        const QString model = localModel->currentText().trimmed();
+        if (model.isEmpty()) {
+            contextWarning->hide();
+            return;
+        }
+
+        QNetworkRequest request{QUrl(base + "/api/ps")};
+        request.setTransferTimeout(5000);
+        auto* reply = nam->get(request);
+        QObject::connect(reply, &QNetworkReply::finished, contextWarning,
+                         [reply, model, toolsCheck, contextWarning]() {
+            reply->deleteLater();
+            contextWarning->hide();
+            if (reply->error() != QNetworkReply::NoError)
+                return;
+
+            for (const auto& val : QJsonDocument::fromJson(reply->readAll())
+                                       .object()["models"].toArray()) {
+                const auto entry = val.toObject();
+                if (entry["name"].toString() != model && entry["model"].toString() != model)
+                    continue;
+
+                const int context = entry["context_length"].toInt();
+                const int recommended = AiService::recommendedLocalContext(toolsCheck->isChecked());
+                if (context <= 0 || context >= recommended)
+                    return;
+
+                contextWarning->setText(QString(
+                    "%1 is loaded with a %2-token context, but OpenDaw needs about %3. "
+                    "Longer prompts are cut off, so the model may ignore tools or "
+                    "instructions. Restart Ollama with OLLAMA_CONTEXT_LENGTH=%3 "
+                    "(on Linux: sudo systemctl edit ollama).")
+                    .arg(model).arg(context).arg(recommended));
+                contextWarning->show();
+                return;
+            }
+        });
+    };
+
+    connect(localModel, &QComboBox::activated, this, checkContext);
+    connect(toolsCheck, &QCheckBox::toggled, this, [checkContext](bool enabled) {
+        AiService::setLocalUseTools(enabled);
+        checkContext();
+    });
 
     // Lists the server's models via GET <address>/models.
-    auto* nam = new QNetworkAccessManager(page);
     connect(refreshBtn, &QPushButton::clicked, this,
-            [nam, urlEdit, localKey, localModel, localStatus]() {
+            [nam, urlEdit, localKey, localModel, localStatus, checkContext]() {
         QString base = urlEdit->text().trimmed();
         while (base.endsWith('/')) base.chop(1);
         QNetworkRequest request{QUrl(base + "/models")};
@@ -363,7 +424,7 @@ QWidget* SettingsDialog::createAiPage()
 
         auto* reply = nam->get(request);
         QObject::connect(reply, &QNetworkReply::finished, localStatus,
-                         [reply, localModel, localStatus, base]() {
+                         [reply, localModel, localStatus, base, checkContext]() {
             reply->deleteLater();
             if (reply->error() != QNetworkReply::NoError) {
                 localStatus->setText(QString("Could not reach %1 (%2). Is the server running?")
@@ -387,6 +448,7 @@ QWidget* SettingsDialog::createAiPage()
             localStatus->setText(models.isEmpty()
                 ? QString("Connected, but the server reports no models.")
                 : QString("Connected: %1 model(s) available.").arg(models.size()));
+            checkContext();
         });
     });
 
