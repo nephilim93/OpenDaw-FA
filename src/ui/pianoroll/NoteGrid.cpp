@@ -46,6 +46,8 @@ NoteGrid::NoteGrid(QWidget* parent) : QGraphicsView(parent)
     setAccessibleName("Note Grid");
     scene_ = new NoteGridScene(this);
     setScene(scene_);
+    connect(scene_, &QGraphicsScene::selectionChanged,
+            this, &NoteGrid::noteSelectionChanged);
 
     setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOn);
@@ -474,6 +476,15 @@ void NoteGrid::wheelEvent(QWheelEvent* event)
 }
 
 // ── Selection ─────────────────────────────────────────────────────────
+
+std::vector<te::MidiNote*> NoteGrid::selectedNotes() const
+{
+    std::vector<te::MidiNote*> result;
+    for (auto* item : noteItems_)
+        if (item->isSelected())
+            result.push_back(item->note());
+    return result;
+}
 
 void NoteGrid::deleteSelectedNotes()
 {

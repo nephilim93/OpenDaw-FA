@@ -19,6 +19,7 @@ public:
     void setClips(const std::vector<te::MidiClip*>& clips, const std::set<int>& hidden);
     void setPixelsPerBeat(double ppb) { pixelsPerBeat_ = ppb; update(); }
     void setScrollOffset(int x) { scrollOffset_ = x; update(); }
+    void setSelectedNotes(const std::set<te::MidiNote*>& notes) { selectedNotes_ = notes; update(); }
     void refresh();
 
 signals:
@@ -28,17 +29,21 @@ protected:
     void paintEvent(QPaintEvent* event) override;
     void mousePressEvent(QMouseEvent* event) override;
     void mouseMoveEvent(QMouseEvent* event) override;
-    void mouseReleaseEvent(QMouseEvent* event) override;
 
 private:
-    std::vector<te::MidiNote*> notesAtX(double x) const;
+    struct Stem { te::MidiNote* note; QColor color; bool selected; };
+    std::vector<Stem> visibleStems() const;
+    std::vector<te::MidiNote*> notesToEditAt(double x) const;
+    double stemX(const te::MidiNote* note) const;
+    int velocityAtY(double y) const;
+    void applyVelocityAt(const QPointF& pos);
 
     std::vector<te::MidiClip*> allClips_;
     std::set<int> hiddenChannels_;
     te::MidiClip* primaryClip_ = nullptr;
     double pixelsPerBeat_ = 60.0;
     int scrollOffset_ = 0;
-    std::vector<te::MidiNote*> draggingNotes_;
+    std::set<te::MidiNote*> selectedNotes_;
 };
 
 } // namespace OpenDaw
