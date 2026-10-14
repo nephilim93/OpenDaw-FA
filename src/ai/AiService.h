@@ -41,6 +41,9 @@ public:
     static void setConfirmDestructive(bool confirm);
     static bool previewMixPlanMode();
     static void setPreviewMixPlanMode(bool enabled);
+    // "low", "medium", "high", "xhigh" or "max"; sent to models that take it
+    static QString effort();
+    static void setEffort(const QString& effort);
 
     bool isBusy() const { return busy_; }
 
@@ -68,6 +71,10 @@ private:
     void continueAfterToolResults(const QVector<AiToolResult>& results,
                                   const AiMessage& assistantMsg);
     QString buildSystemPrompt() const;
+    static const char* const kSystemPromptRules;
+    AiContentBlock buildProjectSnapshot() const;
+    void applyModelOptions(QJsonObject& body, QNetworkRequest& request,
+                           const QString& effortLevel, bool allowFallback) const;
     QJsonObject messageToJson(const AiMessage& msg) const;
     void setBusy(bool busy);
 
@@ -86,6 +93,8 @@ private:
     QString currentToolInputStr_;
     bool inToolInput_ = false;
     int currentBlockIndex_ = -1;
+    QString currentStopReason_;
+    QString currentRefusalCategory_;
 
     bool busy_ = false;
 
@@ -93,7 +102,6 @@ private:
     int toolRoundCount_ = 0;
 
     QSet<QString> executedToolIds_;
-    void pruneHistory();
 };
 
 } // namespace OpenDaw

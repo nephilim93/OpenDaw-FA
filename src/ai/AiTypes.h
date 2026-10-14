@@ -55,16 +55,27 @@ struct AiToolResult {
 };
 
 struct AiContentBlock {
-    QString type;          // "text" or "tool_use" or "tool_result"
-    QString text;          // for "text"
+    // "text", "tool_use", "tool_result", "thinking", "redacted_thinking",
+    // "fallback" (marks a server-side model switch), or "context" (a hidden
+    // project-state snapshot sent to the model as text, not shown in chat)
+    QString type;
+    QString text;          // for "text" and "context"
     AiToolCall toolCall;   // for "tool_use"
     AiToolResult toolResult; // for "tool_result"
+    QString thinking;      // for "thinking" (may be empty when omitted)
+    QString signature;     // for "thinking"; must be sent back unchanged
+    QString data;          // for "redacted_thinking"
 
     QJsonObject toJson() const {
         QJsonObject obj;
         obj["type"] = type;
-        if (type == "text") {
+        if (type == "text" || type == "context") {
             obj["text"] = text;
+        } else if (type == "thinking") {
+            obj["thinking"] = thinking;
+            obj["signature"] = signature;
+        } else if (type == "redacted_thinking") {
+            obj["data"] = data;
         } else if (type == "tool_use") {
             obj["tool_call"] = toolCall.toJson();
         } else if (type == "tool_result") {
@@ -76,8 +87,13 @@ struct AiContentBlock {
     static AiContentBlock fromJson(const QJsonObject& obj) {
         AiContentBlock block;
         block.type = obj["type"].toString();
-        if (block.type == "text") {
+        if (block.type == "text" || block.type == "context") {
             block.text = obj["text"].toString();
+        } else if (block.type == "thinking") {
+            block.thinking = obj["thinking"].toString();
+            block.signature = obj["signature"].toString();
+        } else if (block.type == "redacted_thinking") {
+            block.data = obj["data"].toString();
         } else if (block.type == "tool_use") {
             block.toolCall = AiToolCall::fromJson(obj["tool_call"].toObject());
         } else if (block.type == "tool_result") {

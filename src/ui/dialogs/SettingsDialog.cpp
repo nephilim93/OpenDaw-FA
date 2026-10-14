@@ -34,15 +34,24 @@ QLabel* makeNote(const QString& text, QWidget* parent)
     return note;
 }
 
-// Models the assistant's request code supports today (they run without
-// extended thinking when it is not requested).
 struct ModelChoice { const char* label; const char* id; };
 const ModelChoice kModels[] = {
-    { "Claude Opus 4.8",             "claude-opus-4-8" },
-    { "Claude Opus 4.7",             "claude-opus-4-7" },
-    { "Claude Opus 4.6 (default)",   "claude-opus-4-6" },
-    { "Claude Sonnet 4.6",           "claude-sonnet-4-6" },
-    { "Claude Haiku 4.5",            "claude-haiku-4-5" },
+    { "Claude Opus 5.5 (recommended)",       "claude-opus-5-5" },
+    { "Claude Sonnet 5.5 (faster)",          "claude-sonnet-5-5" },
+    { "Claude Haiku 5.5 (fastest, cheapest)", "claude-haiku-5-5" },
+    { "Claude Fable 5.1 (most capable)",     "claude-fable-5-1" },
+    { "Claude Opus 4.8",                     "claude-opus-4-8" },
+    { "Claude Sonnet 4.6",                   "claude-sonnet-4-6" },
+    { "Claude Haiku 4.5",                    "claude-haiku-4-5" },
+};
+
+struct EffortChoice { const char* label; const char* id; };
+const EffortChoice kEfforts[] = {
+    { "Low (fastest)",  "low" },
+    { "Medium",         "medium" },
+    { "High",           "high" },
+    { "Extra high",     "xhigh" },
+    { "Max (slowest)",  "max" },
 };
 
 } // namespace
@@ -219,6 +228,19 @@ QWidget* SettingsDialog::createAiPage()
     connect(customModel, &QLineEdit::editingFinished, this, [customModel]() {
         if (!customModel->text().trimmed().isEmpty())
             AiService::setModel(customModel->text().trimmed());
+    });
+
+    auto* effortCombo = new QComboBox(group);
+    effortCombo->setAccessibleName("Effort");
+    effortCombo->setToolTip("How much the model thinks before acting. Higher is more "
+                            "thorough but slower and uses more tokens. Older models "
+                            "may ignore it or use the nearest level.");
+    for (const auto& e : kEfforts)
+        effortCombo->addItem(e.label, QString(e.id));
+    effortCombo->setCurrentIndex(std::max(0, effortCombo->findData(AiService::effort())));
+    form->addRow("Effort:", effortCombo);
+    connect(effortCombo, &QComboBox::activated, this, [effortCombo]() {
+        AiService::setEffort(effortCombo->currentData().toString());
     });
 
     auto* confirmCheck = new QCheckBox("Confirm destructive actions", group);
