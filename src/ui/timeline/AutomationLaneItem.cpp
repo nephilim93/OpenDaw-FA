@@ -555,6 +555,23 @@ void AutomationLaneItem::addPointAt(const QPointF& local)
     rebuildFromCurve();
 }
 
+// Removes the automation point under `local`, if any.
+void AutomationLaneItem::erasePointAt(const QPointF& local)
+{
+    if (!param_ || !edit_)
+        return;
+
+    int index = EnvelopeUtils::hitTestPoint(cachedPoints_, pixelsPerBeat_,
+                                            param_->getValueRange().getStart(),
+                                            param_->getValueRange().getEnd(),
+                                            laneHeight_, local);
+    if (index < 0)
+        return;
+
+    param_->getCurve().removePoint(index, &edit_->getUndoManager());
+    rebuildFromCurve();
+}
+
 void AutomationLaneItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
 {
     if (!param_ || !edit_ || event->button() != Qt::LeftButton) {
@@ -573,6 +590,16 @@ void AutomationLaneItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
         freehandDrawing_ = true;
         freehandPath_.clear();
         freehandPath_.append(local);
+        event->accept();
+        return;
+    }
+
+    // Eraser removes the points it passes over, the click included.
+    if (EditToolState::instance().tool() == EditTool::Eraser) {
+        clearPointSelection();
+        edit_->getUndoManager().beginNewTransaction("Erase Automation");
+        erasing_ = true;
+        erasePointAt(local);
         event->accept();
         return;
     }
@@ -619,6 +646,12 @@ void AutomationLaneItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
 
 void AutomationLaneItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
 {
+    if (erasing_) {
+        erasePointAt(event->pos());
+        event->accept();
+        return;
+    }
+
     if (curveDragging_ && param_ && edit_) {
         double deltaY = event->scenePos().y() - curveDragStartPos_.y();
 
@@ -661,6 +694,12 @@ void AutomationLaneItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event)
 
 void AutomationLaneItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event)
 {
+    if (erasing_) {
+        erasing_ = false;
+        event->accept();
+        return;
+    }
+
     if (curveDragging_) {
         curveDragging_ = false;
         curveDragSegmentIndex_ = -1;
@@ -749,6 +788,8 @@ void AutomationLaneItem::hoverMoveEvent(QGraphicsSceneHoverEvent* event)
 
     if (EditToolState::instance().tool() == EditTool::Pen) {
         setCursor(Qt::CrossCursor);
+    } else if (EditToolState::instance().tool() == EditTool::Eraser) {
+        setCursor(Qt::PointingHandCursor);
     } else if (!param_->isDiscrete() && EnvelopeUtils::hitTestCurve(curvePath_, local, 5.0)) {
         setCursor(Qt::SizeVerCursor);
     } else {

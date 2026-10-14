@@ -2154,6 +2154,16 @@ ClipItem* TimelineView::clipItemAt(const QPointF& scenePos) const
     return nullptr;
 }
 
+AutomationLaneItem* TimelineView::automationLaneAt(const QPointF& scenePos) const
+{
+    for (auto* item : scene_->items(scenePos)) {
+        for (auto* it = item; it; it = it->parentItem())
+            if (auto* lane = dynamic_cast<AutomationLaneItem*>(it))
+                return lane;
+    }
+    return nullptr;
+}
+
 // Handles viewport mouse events for the Eraser, Split and Glue tools before
 // they reach the clips. Returns true if the event was consumed. Pointer and
 // Pen fall through to the normal clip and background handling.
@@ -2197,6 +2207,10 @@ bool TimelineView::handleToolMouseEvent(QEvent* event)
     graphicsView_->setFocus(Qt::MouseFocusReason);
 
     auto* item = clipItemAt(scenePos);
+    // Erasing that starts on an automation lane belongs to the lane: it
+    // removes points, not clips.
+    if (tool == EditTool::Eraser && !item && automationLaneAt(scenePos))
+        return false;
     if (tool == EditTool::Eraser) {
         isErasing_ = true;
         editMgr_->edit()->getUndoManager().beginNewTransaction("Erase Clips");

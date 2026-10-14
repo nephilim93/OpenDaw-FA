@@ -58,6 +58,7 @@ protected:
 
 private:
     void addPointAt(const QPointF& local);
+    void erasePointAt(const QPointF& local);
     void clearPointItems();
     void rebuildPointItems();
     QVector<EnvelopePoint> getPointsFromCurve() const;
@@ -75,6 +76,9 @@ private:
     QPainterPath curvePath_;
     QVector<EnvelopePoint> cachedPoints_;
     double playheadBeat_ = -1.0;
+
+    // Eraser drag state
+    bool erasing_ = false;
 
     // Freehand draw state
     bool freehandDrawing_ = false;
