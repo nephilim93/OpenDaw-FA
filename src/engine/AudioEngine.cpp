@@ -54,9 +54,19 @@ AudioEngine::AudioEngine()
     // OpenDaw's own plugin types, so edits can create and reload them.
     engine_->getPluginManager().createBuiltInType<VelocityFxPlugin>();
     engine_->getPluginManager().createBuiltInType<ModularSynthPlugin>();
+
+    engine_->getDeviceManager().addChangeListener(this);
 }
 
-AudioEngine::~AudioEngine() = default;
+AudioEngine::~AudioEngine()
+{
+    engine_->getDeviceManager().removeChangeListener(this);
+}
+
+void AudioEngine::changeListenerCallback(juce::ChangeBroadcaster*)
+{
+    applyMidiDeviceSettings();
+}
 
 te::DeviceManager& AudioEngine::deviceManager()
 {
@@ -189,7 +199,14 @@ void AudioEngine::applyMidiDeviceSettings()
     for (int i = 0; i < dm.getNumMidiInDevices(); ++i) {
         if (auto dev = dm.getMidiInDevice(i)) {
             const QString name = QString::fromUtf8(dev->getName().toRawUTF8());
-            dev->setEnabled(!disabledInputs.contains(name));
+            // Only write when different, so applying never re-triggers a rescan.
+            const bool enable = !disabledInputs.contains(name);
+            if (dev->isEnabled() != enable)
+                dev->setEnabled(enable);
+            // Tracktion's default ("automatic") only plays live MIDI on
+            // record-armed tracks; a controller should play its track at once.
+            if (dev->getMonitorMode() != te::InputDevice::MonitorMode::on)
+                dev->setMonitorMode(te::InputDevice::MonitorMode::on);
         }
     }
 
@@ -199,7 +216,9 @@ void AudioEngine::applyMidiDeviceSettings()
     for (int i = 0; i < dm.getNumMidiOutDevices(); ++i) {
         if (auto* dev = dm.getMidiOutDevice(i)) {
             const QString name = QString::fromUtf8(dev->getName().toRawUTF8());
-            dev->setEnabled(enabledOutputs.contains(name));
+            const bool enable = enabledOutputs.contains(name);
+            if (dev->isEnabled() != enable)
+                dev->setEnabled(enable);
         }
     }
 }

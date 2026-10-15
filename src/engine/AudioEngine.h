@@ -7,7 +7,7 @@ namespace te = tracktion::engine;
 
 namespace OpenDaw {
 
-class AudioEngine {
+class AudioEngine : private juce::ChangeListener {
 public:
     AudioEngine();
     ~AudioEngine();
@@ -31,6 +31,9 @@ public:
     void applyMidiDeviceSettings();
 
 private:
+    // Re-applies MIDI settings when devices appear (e.g. a controller plugged in).
+    void changeListenerCallback(juce::ChangeBroadcaster*) override;
+
     std::unique_ptr<te::Engine> engine_;
 };
 
