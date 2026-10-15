@@ -78,6 +78,7 @@ set(OpenDaw_SOURCES
     src/modular/Module.h src/modular/ModuleRegistry.h src/modular/Modules.cpp
     src/modular/ModuleHelpers.h src/modular/ModuleLibrary.h
     src/modular/ModulesSequencing.cpp src/modular/ModulesRandom.cpp src/modular/ModulesFx.cpp
+    src/modular/ModulesExtra.cpp
     src/modular/Patch.h src/modular/Patch.cpp
     src/modular/CompiledPatch.h src/modular/CompiledPatch.cpp
     src/engine/PluginScanner.h      src/engine/PluginScanner.cpp
@@ -283,7 +284,7 @@ if(OPENDAW_BUILD_TESTS)
     add_executable(opendaw_modular_tests ${OpenDawModularTests_SOURCES} src/music/Theory.cpp)
     target_include_directories(opendaw_modular_tests PRIVATE src)
     target_link_libraries(opendaw_modular_tests PRIVATE Qt6::Core)
-    foreach(_group patch pitch envelope feedback voices sequencing random fx catalog)
+    foreach(_group patch pitch envelope feedback voices sequencing random fx extra catalog)
         add_test(NAME modular.${_group} COMMAND opendaw_modular_tests ${_group})
     endforeach()
 endif()

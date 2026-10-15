@@ -445,6 +445,7 @@ std::vector<ModuleDef> buildRegistry()
     addSequencingModules(defs);
     addRandomModules(defs);
     addFxModules(defs);
+    addExtraModules(defs);
     return defs;
 }
 
