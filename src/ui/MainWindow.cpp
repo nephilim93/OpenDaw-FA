@@ -4,6 +4,8 @@
 #include "ui/pianoroll/PianoRollEditor.h"
 #include "ui/audioclip/AudioClipEditor.h"
 #include "ui/sheetmusic/SheetMusicView.h"
+#include "ui/modular/ModularEditorLink.h"
+#include "ui/modular/ModularEditorView.h"
 #include "ui/dialogs/ExportDialog.h"
 #include "ui/dialogs/SettingsDialog.h"
 #include "ui/video/VideoPlayerWidget.h"
@@ -101,6 +103,8 @@ MainWindow::MainWindow(OpenDawApplication& app, QWidget* parent)
                     effectChain_->setTrack(track);
                 if (mixerView_)
                     mixerView_->setSelectedTrack(track);
+                if (modularEditor_)
+                    modularEditor_->setTrack(track);
             });
 
     connect(timelineView_, &TimelineView::selectedClipsDeleted,
@@ -457,6 +461,10 @@ void MainWindow::createMenus()
         sheetMusicDock_->setVisible(!sheetMusicDock_->isVisible());
         if (sheetMusicDock_->isVisible()) sheetMusicDock_->raise();
     });
+    viewMenu->addAction("Toggle M&odular", this, [this]() {
+        modularDock_->setVisible(!modularDock_->isVisible());
+        if (modularDock_->isVisible()) modularDock_->raise();
+    });
     viewMenu->addAction("Toggle Marker/&Tempo Lane", this, [this]() {
         if (timelineView_) timelineView_->toggleMarkerTempoLane();
     });
@@ -736,6 +744,8 @@ void MainWindow::createDocks()
                     timelineView_->setSelectedTrack(track);
                 if (effectChain_)
                     effectChain_->setTrack(track);
+                if (modularEditor_)
+                    modularEditor_->setTrack(track);
             });
 
     connect(mixerView_, &MixerView::masterSelected,
@@ -848,6 +858,8 @@ void MainWindow::createDocks()
                     effectChain_->setTrack(track);
                 if (mixerView_)
                     mixerView_->setSelectedTrack(track);
+                if (modularEditor_)
+                    modularEditor_->setTrack(track);
                 if (effectsDock_) {
                     effectsDock_->setVisible(true);
                     effectsDock_->raise();
@@ -903,6 +915,16 @@ void MainWindow::createDocks()
             });
     qDebug() << "[MainWindow] sheet music dock done";
 
+    // Modular patch editor dock (bottom, tabbed after sheet music)
+    modularDock_ = new QDockWidget("Modular", this);
+    modularDock_->setAccessibleName("Modular Editor Dock");
+    modularEditor_ = new ModularEditorView(&editMgr_, modularDock_);
+    modularDock_->setWidget(modularEditor_);
+    addDockWidget(Qt::BottomDockWidgetArea, modularDock_);
+
+    connect(&ModularEditorLink::instance(), &ModularEditorLink::openRequested,
+            this, &MainWindow::showModularEditor);
+
     // Video Player dock (bottom, tabbed with others)
     videoPlayerDock_ = new QDockWidget("Video", this);
     videoPlayerDock_->setAccessibleName("Video Player Dock");
@@ -915,7 +937,8 @@ void MainWindow::createDocks()
     tabifyDockWidget(pianoRollDock_, audioClipDock_);
     tabifyDockWidget(audioClipDock_, routingDock_);
     tabifyDockWidget(routingDock_, sheetMusicDock_);
-    tabifyDockWidget(sheetMusicDock_, videoPlayerDock_);
+    tabifyDockWidget(sheetMusicDock_, modularDock_);
+    tabifyDockWidget(modularDock_, videoPlayerDock_);
     mixerDock_->raise();
 
     connect(&editMgr_, &EditManager::midiClipDoubleClicked,
@@ -1324,6 +1347,14 @@ void MainWindow::onMidiClipDoubleClicked(te::MidiClip* clip)
 
     if (pianoRoll_)
         pianoRoll_->setClip(clip, &editMgr_);
+}
+
+void MainWindow::showModularEditor(te::AudioTrack* track)
+{
+    if (!track || !modularDock_) return;
+    modularEditor_->setTrack(track);
+    modularDock_->setVisible(true);
+    modularDock_->raise();
 }
 
 void MainWindow::onAudioClipDoubleClicked(te::WaveAudioClip* clip)

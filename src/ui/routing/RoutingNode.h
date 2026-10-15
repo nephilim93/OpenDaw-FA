@@ -18,15 +18,18 @@ class RoutingNode;
 
 class JackItem : public QGraphicsEllipseItem {
 public:
-    JackItem(bool isInput, int index, RoutingNode* parentNode);
+    // Any parent works; jacks on a RoutingNode take its category colour
+    // unless setRingColor() picks another.
+    JackItem(bool isInput, int index, QGraphicsItem* parent);
 
     bool isInput() const { return isInput_; }
     int jackIndex() const { return index_; }
-    RoutingNode* parentNode() const { return parentNode_; }
+    RoutingNode* parentNode() const;
     QPointF sceneCenterPos() const;
 
     void setConnected(bool c, const QColor& cableColor = Qt::black);
     void setHighlighted(bool h);
+    void setRingColor(const QColor& c) { ringColor_ = c; update(); }
 
 protected:
     void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
@@ -35,7 +38,7 @@ protected:
 private:
     bool isInput_;
     int index_;
-    RoutingNode* parentNode_;
+    QColor ringColor_;
     bool connected_ = false;
     bool highlighted_ = false;
     QColor cableColor_ = Qt::black;

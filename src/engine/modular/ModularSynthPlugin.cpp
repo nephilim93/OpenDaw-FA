@@ -93,8 +93,12 @@ void ModularSynthPlugin::getChannelNames(juce::StringArray* ins, juce::StringArr
 void ModularSynthPlugin::valueTreePropertyChanged(juce::ValueTree& v, const juce::Identifier& id)
 {
     te::Plugin::valueTreePropertyChanged(v, id);
-    if (v == state && id == kPatchId)
+    // te::Plugin's listener runs before patchJson_'s own, so on undo/redo
+    // the cached value is still the old JSON unless refreshed here.
+    if (v == state && id == kPatchId) {
+        patchJson_.forceUpdateOfCachedValue();
         loadPatchFromState();
+    }
 }
 
 void ModularSynthPlugin::restorePluginStateFromValueTree(const juce::ValueTree& v)

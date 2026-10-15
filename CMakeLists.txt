@@ -128,6 +128,9 @@ set(OpenDaw_SOURCES
     src/ui/routing/RoutingView.h          src/ui/routing/RoutingView.cpp
     src/ui/routing/RoutingNode.h          src/ui/routing/RoutingNode.cpp
     src/ui/routing/CableItem.h            src/ui/routing/CableItem.cpp
+    src/ui/modular/ModularEditorView.h    src/ui/modular/ModularEditorView.cpp
+    src/ui/modular/ModulePanelItem.h      src/ui/modular/ModulePanelItem.cpp
+    src/ui/modular/ModularEditorLink.h    src/ui/modular/ModularEditorLink.cpp
     src/ui/sheetmusic/SheetMusicView.h    src/ui/sheetmusic/SheetMusicView.cpp
     src/ui/sheetmusic/NotationModel.h     src/ui/sheetmusic/NotationModel.cpp
     src/ui/sheetmusic/ScoreScene.h        src/ui/sheetmusic/ScoreScene.cpp
@@ -286,4 +289,31 @@ if(OPENDAW_BUILD_TESTS)
     foreach(_group patch pitch envelope feedback voices sequencing random fx catalog)
         add_test(NAME modular.${_group} COMMAND opendaw_modular_tests ${_group})
     endforeach()
+endif()
+
+# ── Modular editor test (optional) ──────────────────────────────────────────
+# Drives the Modular patch editor against a real Edit and Modular Synth with
+# Qt's offscreen platform. It needs the whole engine, so it compiles the app
+# sources like the eval runner does; kept apart from the light suite above.
+# Run with: ctest --test-dir build -R modular.editor --output-on-failure
+option(OPENDAW_BUILD_EDITOR_TESTS "Build the Modular editor UI test" OFF)
+if(OPENDAW_BUILD_EDITOR_TESTS)
+    enable_testing()
+    set(OpenDawEditorTest_SOURCES ${OpenDaw_SOURCES})
+    list(REMOVE_ITEM OpenDawEditorTest_SOURCES src/main.cpp)
+    juce_add_console_app(opendaw_modular_editor_test PRODUCT_NAME "OpenDawModularEditorTest")
+    target_sources(opendaw_modular_editor_test PRIVATE ${OpenDawEditorTest_SOURCES}
+                   tests/modular_editor/ModularEditorTest.cpp)
+    get_target_property(_od_defs OpenDaw COMPILE_DEFINITIONS)
+    target_compile_definitions(opendaw_modular_editor_test PRIVATE ${_od_defs})
+    get_target_property(_od_opts OpenDaw COMPILE_OPTIONS)
+    if(_od_opts)
+        target_compile_options(opendaw_modular_editor_test PRIVATE ${_od_opts})
+    endif()
+    target_include_directories(opendaw_modular_editor_test PRIVATE src ${CMAKE_SOURCE_DIR}/libs/vst2sdk ${FFMPEG_INCLUDE_DIRS})
+    target_link_directories(opendaw_modular_editor_test PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    get_target_property(_od_libs OpenDaw LINK_LIBRARIES)
+    target_link_libraries(opendaw_modular_editor_test PRIVATE ${_od_libs})
+    add_test(NAME modular.editor COMMAND opendaw_modular_editor_test)
+    set_tests_properties(modular.editor PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 endif()

@@ -1,5 +1,7 @@
 #include "TrackHeaderWidget.h"
 #include "ui/effects/PluginEditorWindow.h"
+#include "ui/modular/ModularEditorLink.h"
+#include "engine/modular/ModularSynthPlugin.h"
 #include "utils/IconFont.h"
 #include "utils/ThemeManager.h"
 #include <QVBoxLayout>
@@ -108,7 +110,7 @@ TrackHeaderWidget::TrackHeaderWidget(te::AudioTrack* track, EditManager* editMgr
             : "No Instrument";
         instrumentBtn_ = new QPushButton(instrName, this);
         instrumentBtn_->setAccessibleName("Instrument");
-        instrumentBtn_->setToolTip("Click to open VST UI, right-click to change instrument");
+        instrumentBtn_->setToolTip("Click to open the instrument's editor, right-click to change instrument");
         instrumentBtn_->setFixedHeight(18);
         instrumentBtn_->setContextMenuPolicy(Qt::CustomContextMenu);
         instrumentBtn_->setStyleSheet(
@@ -122,6 +124,8 @@ TrackHeaderWidget::TrackHeaderWidget(te::AudioTrack* track, EditManager* editMgr
             auto* instr = editMgr_->getTrackInstrument(track_);
             if (auto* ext = dynamic_cast<te::ExternalPlugin*>(instr)) {
                 PluginEditorWindow::showForPlugin(*ext);
+            } else if (dynamic_cast<ModularSynthPlugin*>(instr)) {
+                ModularEditorLink::instance().requestOpen(track_);
             } else {
                 emit instrumentSelectRequested(track_);
             }
@@ -138,6 +142,10 @@ TrackHeaderWidget::TrackHeaderWidget(te::AudioTrack* track, EditManager* editMgr
                     if (auto* ext = dynamic_cast<te::ExternalPlugin*>(instr)) {
                         menu.addAction("Open VST Editor", [ext]() {
                             PluginEditorWindow::showForPlugin(*ext);
+                        });
+                    } else if (dynamic_cast<ModularSynthPlugin*>(instr)) {
+                        menu.addAction("Open Modular Editor", [this]() {
+                            ModularEditorLink::instance().requestOpen(track_);
                         });
                     }
                     menu.exec(instrumentBtn_->mapToGlobal(pos));
