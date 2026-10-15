@@ -72,6 +72,8 @@ public:
     void setTrackInstrument(te::AudioTrack& track,
                             const juce::PluginDescription& desc);
     void removeTrackInstrument(te::AudioTrack& track);
+    // Replaces the track's instrument with OpenDaw's Modular Synth (init patch).
+    te::Plugin* setTrackModularSynth(te::AudioTrack& track);
 
     // MIDI FX sit before the instrument and process the track's MIDI. VST
     // MIDI FX often report themselves as synths, so they carry a marker in

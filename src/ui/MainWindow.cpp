@@ -19,6 +19,7 @@
 #include <QFileInfo>
 #include <QDir>
 #include <QMessageBox>
+#include <QMenu>
 #include <QActionGroup>
 #include <map>
 #include "ui/tools/EditToolState.h"
@@ -1300,11 +1301,19 @@ void MainWindow::onInstrumentSelectRequested(te::AudioTrack* track)
 {
     if (!track) return;
 
-    auto& pluginList = app_.pluginScanner().getPluginList();
-    VstSelectorDialog dlg(pluginList, true, this);
-    if (dlg.exec() == QDialog::Accepted && dlg.hasSelection()) {
-        editMgr_.setTrackInstrument(*track, dlg.selectedPlugin());
-    }
+    // OpenDaw's own instrument, or any scanned VST instrument.
+    QMenu menu(this);
+    menu.addAction("Modular Synth (OpenDaw)", this, [this, track]() {
+        editMgr_.setTrackModularSynth(*track);
+    });
+    menu.addSeparator();
+    menu.addAction("VST Instrument...", this, [this, track]() {
+        auto& pluginList = app_.pluginScanner().getPluginList();
+        VstSelectorDialog dlg(pluginList, true, this);
+        if (dlg.exec() == QDialog::Accepted && dlg.hasSelection())
+            editMgr_.setTrackInstrument(*track, dlg.selectedPlugin());
+    });
+    menu.exec(QCursor::pos());
 }
 
 void MainWindow::onMidiClipDoubleClicked(te::MidiClip* clip)

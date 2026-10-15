@@ -1,5 +1,6 @@
 #include "EditManager.h"
 #include "midifx/VelocityFxPlugin.h"
+#include "modular/ModularSynthPlugin.h"
 #include <QSettings>
 #include "utils/FFmpegUtils.h"
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -25,6 +26,7 @@ static const juce::Identifier kMidiFxMarker("openDawMidiFx");
 
 static bool isInstrumentPlugin(te::Plugin* p)
 {
+    if (dynamic_cast<ModularSynthPlugin*>(p)) return true;
     auto* ext = dynamic_cast<te::ExternalPlugin*>(p);
     return ext && ext->isSynth() && !EditManager::isMidiFxPlugin(ext);
 }
@@ -765,6 +767,26 @@ void EditManager::setTrackInstrument(te::AudioTrack& track,
         markDirtyAndNotify();
         emit tracksChanged();
     }
+}
+
+te::Plugin* EditManager::setTrackModularSynth(te::AudioTrack& track)
+{
+    if (!edit_) return nullptr;
+    removeTrackInstrument(track);
+
+    auto plugin = edit_->getPluginCache().createNewPlugin(
+        juce::String(ModularSynthPlugin::xmlTypeName), {});
+    if (!plugin) return nullptr;
+
+    // After any MIDI FX, so they feed the instrument.
+    int index = 0;
+    while (index < track.pluginList.size() && isMidiFxPlugin(track.pluginList[index]))
+        ++index;
+    track.pluginList.insertPlugin(plugin, index, nullptr);
+    markAsMidiTrack(&track);
+    markDirtyAndNotify();
+    emit tracksChanged();
+    return plugin.get();
 }
 
 void EditManager::removeTrackInstrument(te::AudioTrack& track)
