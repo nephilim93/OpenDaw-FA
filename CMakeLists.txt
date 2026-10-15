@@ -251,3 +251,21 @@ target_compile_definitions(OpenDaw PRIVATE
 if(WIN32)
     target_link_libraries(OpenDaw PRIVATE winmm)
 endif()
+
+# ── Modular patching eval runner (optional) ─────────────────────────────────
+# A headless program that runs the AI assistant on the eval cases in
+# .claude/hillclimb/modular-patching and grades the patches it builds.
+option(OPENDAW_BUILD_MODULAR_EVAL "Build the modular patching eval runner" OFF)
+if(OPENDAW_BUILD_MODULAR_EVAL)
+    set(OpenDawModularEval_SOURCES ${OpenDaw_SOURCES})
+    list(REMOVE_ITEM OpenDawModularEval_SOURCES src/main.cpp)
+    juce_add_console_app(OpenDawModularEval PRODUCT_NAME "OpenDawModularEval")
+    target_sources(OpenDawModularEval PRIVATE ${OpenDawModularEval_SOURCES}
+                   tools/modular-eval/ModularEvalMain.cpp)
+    get_target_property(_od_defs OpenDaw COMPILE_DEFINITIONS)
+    target_compile_definitions(OpenDawModularEval PRIVATE ${_od_defs})
+    target_include_directories(OpenDawModularEval PRIVATE src ${CMAKE_SOURCE_DIR}/libs/vst2sdk ${FFMPEG_INCLUDE_DIRS})
+    target_link_directories(OpenDawModularEval PRIVATE ${FFMPEG_LIBRARY_DIRS})
+    get_target_property(_od_libs OpenDaw LINK_LIBRARIES)
+    target_link_libraries(OpenDawModularEval PRIVATE ${_od_libs})
+endif()

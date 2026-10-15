@@ -1,0 +1,11 @@
+{
+  "flow": "modular-patching",
+  "description": "AI assistant building Modular Synth patches from sound-design requests (real AiService, offline render, checks + Sonnet 5.5 judge).",
+  "metrics": [
+    {"id": "pass", "label": "Checks pass", "kind": "binary"},
+    {"id": "judge", "label": "Judge score", "kind": "continuous"},
+    {"id": "checks", "label": "Checks met", "kind": "continuous"}
+  ],
+  "perf_fields": ["patch_cpu_ms"],
+  "harness_paths": ["tools/modular-eval/ModularEvalMain.cpp", ".claude/hillclimb/modular-patching/cases.json", ".claude/hillclimb/modular-patching/fixtures/"]
+}

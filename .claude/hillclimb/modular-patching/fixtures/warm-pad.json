@@ -1,0 +1,21 @@
+{"modules":[
+ {"id":"voice_in","type":"voice_in","x":40,"y":60},
+ {"id":"osc1","type":"vco","params":{"wave":"saw","fine":-9,"level":0.6},"x":240,"y":20},
+ {"id":"osc2","type":"vco","params":{"wave":"saw","fine":9,"level":0.6},"x":240,"y":140},
+ {"id":"mix","type":"mixer","params":{"level1":0.45,"level2":0.45,"master":1},"x":440,"y":60},
+ {"id":"lfo","type":"lfo","params":{"rate":0.25},"x":440,"y":220},
+ {"id":"filter","type":"vcf","params":{"cutoff":2400,"resonance":0.15,"cv_depth":0.8},"x":640,"y":60},
+ {"id":"env","type":"adsr","params":{"attack":0.5,"decay":0.6,"sustain":0.8,"release":1.2},"x":640,"y":220},
+ {"id":"amp","type":"vca","x":840,"y":60},
+ {"id":"voice_out","type":"voice_out","x":1040,"y":60},
+ {"id":"voices","type":"voices","section":"global","x":40,"y":460},
+ {"id":"reverb","type":"reverb","section":"global","params":{"mix":0.35,"size":0.75},"x":240,"y":460},
+ {"id":"output","type":"output","section":"global","x":440,"y":460}],
+ "cables":[
+ {"from":"voice_in.pitch","to":"osc1.pitch"},{"from":"voice_in.pitch","to":"osc2.pitch"},
+ {"from":"osc1.out","to":"mix.in1"},{"from":"osc2.out","to":"mix.in2"},{"from":"mix.out","to":"filter.in"},
+ {"from":"lfo.out","to":"filter.cutoff"},{"from":"voice_in.gate","to":"env.gate"},
+ {"from":"filter.out","to":"amp.in"},{"from":"env.out","to":"amp.cv"},{"from":"amp.out","to":"voice_out.left"},
+ {"from":"voices.left","to":"reverb.left"},{"from":"voices.right","to":"reverb.right"},
+ {"from":"reverb.left","to":"output.left"},{"from":"reverb.right","to":"output.right"}],
+ "macros":[{"name":"Brightness","targets":[{"module":"filter","param":"cutoff","min":600,"max":6000}]}]}

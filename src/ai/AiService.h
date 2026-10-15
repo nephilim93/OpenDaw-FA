@@ -28,6 +28,14 @@ public:
     void clearConversation();
 
     const QVector<AiMessage>& conversationHistory() const { return conversationHistory_; }
+
+    // Token usage summed over the API calls of the last sendMessage (all
+    // tool rounds), and the models that served them, as reported by the API.
+    struct Usage { qint64 input = 0, output = 0, cacheRead = 0, cacheWrite = 0; int calls = 0; };
+    const Usage& turnUsage() const { return turnUsage_; }
+    const QStringList& servedModels() const { return servedModels_; }
+    // The system prompt sent with every request (for eval traces).
+    QString systemPromptText() const { return buildSystemPrompt(); }
     void loadConversation(const QVector<AiMessage>& messages);
 
     void requestSessionTitle(const QString& userMessage);
@@ -121,6 +129,8 @@ private:
     bool inToolInput_ = false;
     int currentBlockIndex_ = -1;
     QString currentStopReason_;
+    Usage turnUsage_;
+    QStringList servedModels_;
     bool localRequest_ = false;
     OpenAiCompat::StreamState localStream_;
     QElapsedTimer localTimer_;

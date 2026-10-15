@@ -9,3 +9,9 @@ CMakeSettings.json
 *.swo
 *~
 .cursor/
+# Eval output (derived / bulk)
+.claude/hillclimb/**/traces/
+.claude/hillclimb/**/report.html
+.claude/hillclimb/**/state.json
+.claude/hillclimb/**/trajectory/
+.claude/hillclimb/modular-patching-pilot/

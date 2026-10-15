@@ -1,0 +1,981 @@
+[
+  {
+    "id": "seed-pad",
+    "tags": [
+      "pad",
+      "seed"
+    ],
+    "prompt": "Create a MIDI track with a warm detuned pad on the Modular Synth, with a Brightness macro.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        57,
+        60,
+        64,
+        67
+      ],
+      "hold_s": 2.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "min_attack_s": 0.15,
+      "macro_named": "bright"
+    },
+    "source": "user-tested"
+  },
+  {
+    "id": "seed-darker",
+    "tags": [
+      "edit",
+      "seed"
+    ],
+    "prompt": "Make it darker and add slow filter movement.",
+    "start": "warm-pad",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        57,
+        60,
+        64,
+        67
+      ],
+      "hold_s": 2.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "centroid_ratio_vs_start": {
+        "max": 0.85
+      },
+      "has_module": [
+        "lfo"
+      ]
+    },
+    "source": "user-tested"
+  },
+  {
+    "id": "seed-acid",
+    "tags": [
+      "sequenced",
+      "seed"
+    ],
+    "prompt": "On a new track, build an acid bassline in A minor from the step sequencer, with a dotted-eighth delay.",
+    "start": "empty",
+    "play": {
+      "mode": "transport",
+      "seconds": 8
+    },
+    "checks": {
+      "audible": true,
+      "plays_without_notes": true,
+      "has_module": [
+        "step_sequencer",
+        "delay"
+      ],
+      "has_param": [
+        {
+          "type": "delay",
+          "param": "sync",
+          "value": "1/8d"
+        }
+      ]
+    },
+    "source": "user-tested"
+  },
+  {
+    "id": "seed-pluck",
+    "tags": [
+      "pluck",
+      "seed"
+    ],
+    "prompt": "Give me a bright plucky lead for arpeggios on a new MIDI track.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 1.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "decays": true,
+      "min_centroid": 1800
+    },
+    "source": "adapted from user flow"
+  },
+  {
+    "id": "bass-sub",
+    "tags": [
+      "bass"
+    ],
+    "prompt": "Make a clean sub bass I can play under a kick.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        36
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "max_centroid": 350
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "bass-reese",
+    "tags": [
+      "bass"
+    ],
+    "prompt": "I want a gritty reese bass: two detuned saws through a lowpass that slowly moves.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        36
+      ],
+      "hold_s": 2.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "max_centroid": 2000,
+      "has_module": [
+        "lfo"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "bass-pluck",
+    "tags": [
+      "bass"
+    ],
+    "prompt": "Funky plucked bass with a quick filter envelope, like a synth slap bass.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        40
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "decays": true
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "bass-acid-poly",
+    "tags": [
+      "bass"
+    ],
+    "prompt": "303-style acid bass I can play from my keyboard, with glide between notes.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        45
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "has_param": [
+        {
+          "type": "voice_in",
+          "param": "glide",
+          "min": 0.01
+        }
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "bass-fm",
+    "tags": [
+      "bass",
+      "hard"
+    ],
+    "prompt": "Metallic FM bass: one oscillator modulating another's frequency.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        40
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "min_vco": 2,
+      "fm_used": true
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "pad-dark-ambient",
+    "tags": [
+      "pad"
+    ],
+    "prompt": "A dark, slow ambient pad with lots of reverb for a film score.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        48,
+        55,
+        60
+      ],
+      "hold_s": 3.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "min_attack_s": 0.4,
+      "max_centroid": 1500,
+      "has_module": [
+        "reverb"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "pad-strings",
+    "tags": [
+      "pad"
+    ],
+    "prompt": "Lush string-machine pad, 70s style, with gentle vibrato.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60,
+        64,
+        67
+      ],
+      "hold_s": 2.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "min_attack_s": 0.1,
+      "has_module": [
+        "lfo"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "pad-evolving",
+    "tags": [
+      "pad"
+    ],
+    "prompt": "An evolving pad where the tone keeps shifting on its own over several seconds.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        57,
+        64
+      ],
+      "hold_s": 5.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "has_module": [
+        "lfo"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "pad-bright-supersaw",
+    "tags": [
+      "pad",
+      "hard"
+    ],
+    "prompt": "Big bright trance supersaw chord stack.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60,
+        64,
+        67
+      ],
+      "hold_s": 2.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "min_vco": 3,
+      "min_centroid": 2000
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "pad-noise",
+    "tags": [
+      "pad"
+    ],
+    "prompt": "Airy breathy pad with some filtered noise mixed in.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60,
+        67
+      ],
+      "hold_s": 2.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "has_module": [
+        "noise"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "lead-square",
+    "tags": [
+      "lead"
+    ],
+    "prompt": "Classic square-wave chiptune lead.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        72
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "has_param": [
+        {
+          "type": "vco",
+          "param": "wave",
+          "value": "square"
+        }
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "lead-vibrato-mw",
+    "tags": [
+      "lead"
+    ],
+    "prompt": "Soaring lead with vibrato I can bring in with the mod wheel.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        69
+      ],
+      "hold_s": 1.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "mod_wheel_used": true
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "lead-mono-glide",
+    "tags": [
+      "lead"
+    ],
+    "prompt": "Smooth portamento lead that slides between notes.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        67
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "has_param": [
+        {
+          "type": "voice_in",
+          "param": "glide",
+          "min": 0.02
+        }
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "lead-sync-ish",
+    "tags": [
+      "lead",
+      "hard"
+    ],
+    "prompt": "Aggressive screaming lead with a resonant filter.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        72
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "min_centroid": 1500,
+      "has_param": [
+        {
+          "type": "vcf",
+          "param": "resonance",
+          "min": 0.5
+        }
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "keys-ep",
+    "tags": [
+      "keys"
+    ],
+    "prompt": "Soft electric-piano-like keys with a little tremolo.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60,
+        64,
+        67
+      ],
+      "hold_s": 1.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "decays": true,
+      "has_module": [
+        "lfo"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "keys-bell",
+    "tags": [
+      "keys",
+      "hard"
+    ],
+    "prompt": "Glassy bell sound for a lullaby.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        84
+      ],
+      "hold_s": 2.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "decays": true,
+      "min_centroid": 1500
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "keys-organ",
+    "tags": [
+      "keys"
+    ],
+    "prompt": "Simple organ: no envelope fade, notes stop the moment I let go.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60,
+        64,
+        67
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "max_attack_s": 0.03,
+      "sustains": true
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "pluck-short",
+    "tags": [
+      "pluck"
+    ],
+    "prompt": "Very short percussive pluck, like a marimba.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        72
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "decays": true
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "pluck-delay",
+    "tags": [
+      "pluck"
+    ],
+    "prompt": "Pluck with a ping-pong delay synced to the song.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        67
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "decays": true,
+      "has_param": [
+        {
+          "type": "delay",
+          "param": "ping_pong",
+          "value": "on"
+        }
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "fx-riser",
+    "tags": [
+      "fx"
+    ],
+    "prompt": "A white-noise riser effect that sweeps up while I hold a note.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 3.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "has_module": [
+        "noise"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "fx-wind",
+    "tags": [
+      "fx"
+    ],
+    "prompt": "Wind sound made from filtered noise slowly moving.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 3.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "has_module": [
+        "noise",
+        "lfo"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "drone-generative",
+    "tags": [
+      "drone"
+    ],
+    "prompt": "A generative drone that plays by itself when the song plays, no MIDI needed.",
+    "start": "empty",
+    "play": {
+      "mode": "transport",
+      "seconds": 8
+    },
+    "checks": {
+      "audible": true,
+      "plays_without_notes": true
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "drone-sh",
+    "tags": [
+      "drone",
+      "hard"
+    ],
+    "prompt": "Random sample-and-hold bleeps quantized to D dorian, playing by themselves.",
+    "start": "empty",
+    "play": {
+      "mode": "transport",
+      "seconds": 8
+    },
+    "checks": {
+      "audible": true,
+      "plays_without_notes": true,
+      "has_module": [
+        "sample_hold",
+        "quantizer"
+      ],
+      "has_param": [
+        {
+          "type": "quantizer",
+          "param": "scale",
+          "value": "dorian"
+        }
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "seq-berlin",
+    "tags": [
+      "sequenced"
+    ],
+    "prompt": "Berlin-school sequence: 16 steps of 1/16 notes in C minor with a filter sweep.",
+    "start": "empty",
+    "play": {
+      "mode": "transport",
+      "seconds": 8
+    },
+    "checks": {
+      "audible": true,
+      "plays_without_notes": true,
+      "has_module": [
+        "step_sequencer"
+      ],
+      "has_param": [
+        {
+          "type": "clock",
+          "param": "division",
+          "value": "1/16"
+        }
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "seq-swing",
+    "tags": [
+      "sequenced"
+    ],
+    "prompt": "A swung 1/8 groove bassline in E minor driven by the clock.",
+    "start": "empty",
+    "play": {
+      "mode": "transport",
+      "seconds": 8
+    },
+    "checks": {
+      "audible": true,
+      "plays_without_notes": true,
+      "has_param": [
+        {
+          "type": "clock",
+          "param": "swing",
+          "min": 0.1
+        }
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "seq-triplet",
+    "tags": [
+      "sequenced"
+    ],
+    "prompt": "Triplet-feel arpeggio on its own sequencer, quantized to G major.",
+    "start": "empty",
+    "play": {
+      "mode": "transport",
+      "seconds": 8
+    },
+    "checks": {
+      "audible": true,
+      "plays_without_notes": true,
+      "has_module": [
+        "quantizer"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "seq-random",
+    "tags": [
+      "sequenced",
+      "hard"
+    ],
+    "prompt": "Melodic random walk: random notes quantized to A minor pentatonic, one per 1/8.",
+    "start": "empty",
+    "play": {
+      "mode": "transport",
+      "seconds": 8
+    },
+    "checks": {
+      "audible": true,
+      "plays_without_notes": true,
+      "has_module": [
+        "random",
+        "quantizer"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "seq-poly",
+    "tags": [
+      "sequenced"
+    ],
+    "prompt": "Make a step-sequenced pluck in F minor and add reverb.",
+    "start": "empty",
+    "play": {
+      "mode": "transport",
+      "seconds": 8
+    },
+    "checks": {
+      "audible": true,
+      "plays_without_notes": true,
+      "has_module": [
+        "reverb"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "edit-brighter",
+    "tags": [
+      "edit"
+    ],
+    "prompt": "Make this sound brighter and more present.",
+    "start": "init",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 1.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "centroid_ratio_vs_start": {
+        "min": 1.2
+      }
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "edit-slow-attack",
+    "tags": [
+      "edit"
+    ],
+    "prompt": "Give it a slow fade-in attack.",
+    "start": "init",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 2.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "min_attack_s": 0.3
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "edit-add-delay",
+    "tags": [
+      "edit"
+    ],
+    "prompt": "Add a tempo-synced delay on the whole sound.",
+    "start": "init",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "has_module": [
+        "delay"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "edit-remove-reverb",
+    "tags": [
+      "edit"
+    ],
+    "prompt": "Remove the reverb, it's too washy.",
+    "start": "warm-pad",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        57,
+        60,
+        64
+      ],
+      "hold_s": 2.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "lacks_module": [
+        "reverb"
+      ]
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "edit-macro",
+    "tags": [
+      "edit"
+    ],
+    "prompt": "Add a Cutoff macro and a Space macro I can automate.",
+    "start": "init",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 1.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "macro_named": "cutoff",
+      "macro_count_min": 2
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "edit-detune",
+    "tags": [
+      "edit"
+    ],
+    "prompt": "Make it wider: add a second slightly detuned oscillator.",
+    "start": "init",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 1.5,
+      "release_s": 1.5
+    },
+    "checks": {
+      "audible": true,
+      "pitch_tracks": true,
+      "min_vco": 2
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "neg-no-change",
+    "tags": [
+      "negative"
+    ],
+    "prompt": "What modules does the Modular Synth have? Just tell me, don't change anything.",
+    "start": "init",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "patch_unchanged": true
+    },
+    "source": "synthesized"
+  },
+  {
+    "id": "neg-vst-request",
+    "tags": [
+      "negative"
+    ],
+    "prompt": "Load Serum 2 on this track.",
+    "start": "empty",
+    "play": {
+      "mode": "notes",
+      "notes": [
+        60
+      ],
+      "hold_s": 1.0,
+      "release_s": 1.5
+    },
+    "checks": {
+      "no_modular_created": true
+    },
+    "source": "synthesized"
+  }
+]

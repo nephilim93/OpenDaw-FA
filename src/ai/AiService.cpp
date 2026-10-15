@@ -434,6 +434,9 @@ void AiService::sendMessage(const QString& userText)
         return;
     }
 
+    turnUsage_ = {};
+    servedModels_.clear();
+
     AiMessage userMsg = AiMessage::userMessage(userText);
     userMsg.content.prepend(buildProjectSnapshot());
     conversationHistory_.append(userMsg);
@@ -619,7 +622,18 @@ void AiService::handleStreamChunk()
         auto obj = doc.object();
         QString type = obj["type"].toString();
 
-        if (type == "content_block_start") {
+        if (type == "message_start") {
+            const auto message = obj["message"].toObject();
+            const auto usage = message["usage"].toObject();
+            turnUsage_.input += usage["input_tokens"].toInteger();
+            turnUsage_.cacheRead += usage["cache_read_input_tokens"].toInteger();
+            turnUsage_.cacheWrite += usage["cache_creation_input_tokens"].toInteger();
+            turnUsage_.calls += 1;
+            const QString served = message["model"].toString();
+            if (!served.isEmpty() && !servedModels_.contains(served))
+                servedModels_ << served;
+        }
+        else if (type == "content_block_start") {
             auto blockObj = obj["content_block"].toObject();
             QString blockType = blockObj["type"].toString();
             currentBlockIndex_ = obj["index"].toInt();
@@ -665,6 +679,8 @@ void AiService::handleStreamChunk()
             }
         }
         else if (type == "message_delta") {
+            // Output tokens arrive here (the running total for this call).
+            turnUsage_.output += obj["usage"].toObject()["output_tokens"].toInteger();
             auto delta = obj["delta"].toObject();
             if (delta.contains("stop_reason"))
                 currentStopReason_ = delta["stop_reason"].toString();
