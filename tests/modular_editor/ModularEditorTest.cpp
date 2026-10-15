@@ -1,0 +1,211 @@
+// Offscreen checks of the Modular patch editor against a real Edit and
+// Modular Synth: the scene matches the patch, mouse gestures go through
+// applyOps/setPatch as exactly one undo step, and outside changes (AI,
+// undo) rebuild the view. Run with QT_QPA_PLATFORM=offscreen.
+
+#include <cmath>
+#include "app/JuceQtBridge.h"
+#include "engine/AudioEngine.h"
+#include "engine/EditManager.h"
+#include "engine/modular/ModularSynthPlugin.h"
+#include "ui/controls/RotaryKnob.h"
+#include "ui/modular/ModularEditorView.h"
+
+#include <QApplication>
+#include <QElapsedTimer>
+#include <QGraphicsView>
+#include <QMouseEvent>
+#include <cstdio>
+
+using namespace OpenDaw;
+namespace M = OpenDaw::Modular;
+
+namespace {
+
+int failures = 0;
+
+#define EXPECT(cond)                                                              \
+    do {                                                                          \
+        if (cond) std::printf("  ok    %s\n", #cond);                             \
+        else { std::printf("  FAIL  %s  (line %d)\n", #cond, __LINE__); ++failures; } \
+    } while (0)
+
+void settle(int ms = 50)
+{
+    QElapsedTimer t;
+    t.start();
+    while (t.elapsed() < ms)
+        QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+}
+
+void send(QWidget* target, QEvent::Type type, QPoint pos, Qt::MouseButton button,
+          Qt::MouseButtons buttons)
+{
+    QMouseEvent ev(type, QPointF(pos), QPointF(target->mapToGlobal(pos)), button, buttons,
+                   Qt::NoModifier);
+    QApplication::sendEvent(target, &ev);
+}
+
+// Number of undo steps: undoes until nothing is left, then redoes them all.
+int countUndoSteps(juce::UndoManager& um)
+{
+    int n = 0;
+    while (um.canUndo()) { um.undo(); ++n; }
+    for (int i = 0; i < n; ++i) um.redo();
+    return n;
+}
+
+bool hasCable(const M::Patch& p, const char* from, const char* to)
+{
+    return p.cables.contains(M::Cable{ *M::parsePortRef(from), *M::parsePortRef(to) });
+}
+
+} // namespace
+
+int main(int argc, char** argv)
+{
+    if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+    QApplication app(argc, argv);
+    juce::ScopedJuceInitialiser_GUI juceInit;
+
+    JuceQtBridge bridge;
+    bridge.start();
+    AudioEngine engine;
+    EditManager editMgr(engine);
+    editMgr.stopAutosave();
+
+    auto* track = editMgr.addMidiTrack();
+    auto* synth = track ? dynamic_cast<ModularSynthPlugin*>(editMgr.setTrackModularSynth(*track)) : nullptr;
+    if (!synth) {
+        std::printf("FAIL: could not create a Modular Synth\n");
+        return 1;
+    }
+    synth->setPatch(M::Patch::initPatch(), {});
+    auto& um = editMgr.edit()->getUndoManager();
+
+    ModularEditorView view(&editMgr);
+    view.resize(1400, 900);
+    view.show();
+    view.setTrack(track);
+    settle();
+
+    const auto init = M::Patch::initPatch();
+    std::printf("init patch in the view\n");
+    EXPECT(view.synth() == synth);
+    EXPECT(view.moduleItemCount() == int(init.modules.size()));
+    EXPECT(view.moduleItemCount() == 8);
+    EXPECT(view.cableItemCount() == int(init.cables.size()));
+    EXPECT(view.cableItemCount() == 9);
+    EXPECT(view.panel("vcf1") && view.panel("vcf1")->knob("cutoff"));
+
+    // ── Connect by dragging adsr1.out onto vco1.fm, as a user would ──
+    std::printf("connect by mouse drag\n");
+    um.clearUndoHistory();
+    auto* gv = view.findChild<QGraphicsView*>();
+    auto* viewport = gv->viewport();
+    auto* from = view.panel("adsr1")->findJack("out", false);
+    auto* to = view.panel("vco1")->findJack("fm", true);
+    const QPoint a = gv->mapFromScene(from->sceneCenterPos());
+    const QPoint b = gv->mapFromScene(to->sceneCenterPos());
+    send(viewport, QEvent::MouseButtonPress, a, Qt::LeftButton, Qt::LeftButton);
+    send(viewport, QEvent::MouseMove, (a + b) / 2, Qt::NoButton, Qt::LeftButton);
+    send(viewport, QEvent::MouseMove, b, Qt::NoButton, Qt::LeftButton);
+    send(viewport, QEvent::MouseButtonRelease, b, Qt::LeftButton, Qt::NoButton);
+    settle();
+    EXPECT(hasCable(synth->patch(), "adsr1.out", "vco1.fm"));
+    EXPECT(view.cableItemCount() == 10);
+    EXPECT(countUndoSteps(um) == 1);
+    EXPECT(um.getUndoDescription() == "Connect Cable");
+    um.undo();
+    settle();
+    EXPECT(!hasCable(synth->patch(), "adsr1.out", "vco1.fm"));
+    EXPECT(view.cableItemCount() == 9);   // undo rebuilt the view
+
+    // ── An invalid connection changes nothing and reports why ──
+    std::printf("invalid connection\n");
+    um.clearUndoHistory();
+    EXPECT(!view.connectPorts({ "vco1", "out" }, { "output", "left" }));  // voice -> global
+    EXPECT(!view.lastError().isEmpty());
+    EXPECT(!um.canUndo());
+    EXPECT(synth->patch().cables.size() == init.cables.size());
+
+    // ── A knob drag is one undo step and touches the patch only on release ──
+    std::printf("knob gesture\n");
+    um.clearUndoHistory();
+    auto* knob = view.panel("vcf1")->knob("cutoff");
+    const float before = synth->patch().paramValue(*synth->patch().find("vcf1"),
+        M::findModule("vcf")->paramIndex("cutoff"));
+    const QPoint c = knob->rect().center();
+    send(knob, QEvent::MouseButtonPress, c, Qt::LeftButton, Qt::LeftButton);
+    for (int dy = 4; dy <= 40; dy += 4)
+        send(knob, QEvent::MouseMove, c - QPoint(0, dy), Qt::NoButton, Qt::LeftButton);
+    settle();
+    EXPECT(!um.canUndo());   // nothing stored while dragging
+    send(knob, QEvent::MouseButtonRelease, c - QPoint(0, 40), Qt::LeftButton, Qt::NoButton);
+    settle();
+    const auto afterPatch = synth->patch();
+    const float after = afterPatch.paramValue(*afterPatch.find("vcf1"),
+        M::findModule("vcf")->paramIndex("cutoff"));
+    std::printf("  cutoff %.1f -> %.1f\n", double(before), double(after));
+    EXPECT(after > before);
+    EXPECT(countUndoSteps(um) == 1);
+    EXPECT(um.getUndoDescription() == "Change Parameter");
+
+    // ── An outside edit (as the AI makes) rebuilds the view ──
+    std::printf("live sync\n");
+    auto patch = synth->patch();
+    EXPECT(M::applyOps(patch, { QJsonObject{ { "op", "add_module" }, { "id", "lfo9" },
+                                             { "type", "lfo" } } }).isEmpty());
+    synth->setPatch(patch, "AI: Edit Modular Patch");
+    settle();
+    EXPECT(view.moduleItemCount() == 9);
+    EXPECT(view.panel("lfo9") != nullptr);
+
+    // ── Pulling a cable off its input disconnects it ──
+    std::printf("disconnect by dragging a cable end off\n");
+    um.clearUndoHistory();
+    auto* plugged = view.panel("vcf1")->findJack("in", true);
+    const QPoint p = gv->mapFromScene(plugged->sceneCenterPos());
+    send(viewport, QEvent::MouseButtonPress, p, Qt::LeftButton, Qt::LeftButton);
+    send(viewport, QEvent::MouseMove, p + QPoint(0, 120), Qt::NoButton, Qt::LeftButton);
+    send(viewport, QEvent::MouseButtonRelease, p + QPoint(0, 120), Qt::LeftButton, Qt::NoButton);
+    settle();
+    EXPECT(!hasCable(synth->patch(), "vco1.out", "vcf1.in"));
+    EXPECT(countUndoSteps(um) == 1);
+    EXPECT(um.getUndoDescription() == "Disconnect Cable");
+
+    // ── Zoom survives rebuilds and switching tracks ──
+    std::printf("zoom is kept\n");
+    view.zoomToFit();
+    settle();
+    const double fitted = view.zoomLevel();
+    view.zoomOut();
+    view.zoomOut();
+    const double zoomed = view.zoomLevel();
+    EXPECT(std::abs(zoomed - fitted / 1.5625) < 1e-6);
+    view.scheduleRebuild();
+    settle();
+    EXPECT(std::abs(view.zoomLevel() - zoomed) < 1e-6);
+
+    auto* other = editMgr.addMidiTrack();
+    EXPECT(other && editMgr.setTrackModularSynth(*other));
+    view.setTrack(other);
+    settle();
+    view.setTrack(track);
+    settle();
+    EXPECT(view.synth() == synth);
+    EXPECT(std::abs(view.zoomLevel() - zoomed) < 1e-6);
+
+    // ── Losing the instrument shows the empty state ──
+    std::printf("empty state\n");
+    editMgr.removeTrackInstrument(*track);
+    emit editMgr.tracksChanged();
+    settle();
+    EXPECT(view.synth() == nullptr);
+    EXPECT(view.moduleItemCount() == 0);
+
+    std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);
+    view.setTrack(nullptr);
+    return failures ? 1 : 0;
+}

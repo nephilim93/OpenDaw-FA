@@ -1,8 +1,11 @@
 #include "ChannelStrip.h"
+#include "engine/modular/ModularSynthPlugin.h"
+#include "ui/modular/ModularEditorLink.h"
 #include "utils/ThemeManager.h"
 #include "utils/IconFont.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
+#include <QMenu>
 #include <QSignalBlocker>
 #include <QMouseEvent>
 #include <QPainter>
@@ -166,9 +169,28 @@ void ChannelStrip::setupUI()
                     "border-radius: 3px; font-size: 8px; padding: 1px 3px; }"
                     "QPushButton:hover { background: rgba(255,255,255,25); }")
                 .arg(theme.text.name()));
+        // The Modular Synth opens its editor tab; changing it moves to the
+        // right-click menu, as on the track header.
         connect(instrumentBtn_, &QPushButton::clicked, this, [this]() {
-            emit instrumentSelectRequested(track_);
+            if (dynamic_cast<ModularSynthPlugin*>(editMgr_->getTrackInstrument(track_)))
+                ModularEditorLink::instance().requestOpen(track_);
+            else
+                emit instrumentSelectRequested(track_);
         });
+        instrumentBtn_->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(instrumentBtn_, &QPushButton::customContextMenuRequested,
+                this, [this](const QPoint& pos) {
+                    QMenu menu;
+                    menu.setAccessibleName("Instrument Menu");
+                    menu.addAction("Change Instrument...", [this]() {
+                        emit instrumentSelectRequested(track_);
+                    });
+                    if (dynamic_cast<ModularSynthPlugin*>(editMgr_->getTrackInstrument(track_)))
+                        menu.addAction("Open Modular Editor", [this]() {
+                            ModularEditorLink::instance().requestOpen(track_);
+                        });
+                    menu.exec(instrumentBtn_->mapToGlobal(pos));
+                });
         layout->addWidget(instrumentBtn_);
 
         midiChannelCombo_ = new QComboBox(this);

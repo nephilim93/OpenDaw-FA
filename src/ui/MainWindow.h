@@ -24,6 +24,7 @@ namespace OpenDaw {
 class PianoRollEditor;
 class AudioClipEditor;
 class SheetMusicView;
+class ModularEditorView;
 class VideoPlayerWidget;
 
 class ShortcutFilter : public QObject {
@@ -77,6 +78,7 @@ private:
     void onInstrumentSelectRequested(te::AudioTrack* track);
     void onMidiClipDoubleClicked(te::MidiClip* clip);
     void onAudioClipDoubleClicked(te::WaveAudioClip* clip);
+    void showModularEditor(te::AudioTrack* track);
 
     OpenDawApplication& app_;
     EditManager& editMgr_;
@@ -91,6 +93,7 @@ private:
     AudioClipEditor*   audioClipEditor_ = nullptr;
     RoutingView*       routingView_   = nullptr;
     SheetMusicView*    sheetMusicView_ = nullptr;
+    ModularEditorView* modularEditor_ = nullptr;
     AiChatWidget*      aiChatWidget_  = nullptr;
     AiQuickPrompt*     aiQuickPrompt_ = nullptr;
     VideoPlayerWidget* videoPlayer_   = nullptr;
@@ -102,6 +105,7 @@ private:
     QDockWidget* audioClipDock_      = nullptr;
     QDockWidget* routingDock_         = nullptr;
     QDockWidget* sheetMusicDock_     = nullptr;
+    QDockWidget* modularDock_        = nullptr;
     QDockWidget* videoPlayerDock_    = nullptr;
     QDockWidget* aiDock_              = nullptr;
 

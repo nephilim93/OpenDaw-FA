@@ -15,15 +15,20 @@ bool RoutingNode::groupMoveGuard_ = false;
 
 // ── JackItem ─────────────────────────────────────────────────────────────────
 
-JackItem::JackItem(bool isInput, int index, RoutingNode* parentNode)
-    : QGraphicsEllipseItem(parentNode)
-    , isInput_(isInput), index_(index), parentNode_(parentNode)
+JackItem::JackItem(bool isInput, int index, QGraphicsItem* parent)
+    : QGraphicsEllipseItem(parent)
+    , isInput_(isInput), index_(index)
 {
     const qreal d = RoutingNode::JACK_OUTER_DIAMETER;
     setRect(-d / 2, -d / 2, d, d);
     setAcceptHoverEvents(true);
     setCursor(QCursor(Qt::CrossCursor));
     setZValue(2);
+}
+
+RoutingNode* JackItem::parentNode() const
+{
+    return dynamic_cast<RoutingNode*>(parentItem());
 }
 
 QPointF JackItem::sceneCenterPos() const
@@ -50,7 +55,9 @@ void JackItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget
     const qreal outer = RoutingNode::JACK_OUTER_DIAMETER;
     const qreal inner = RoutingNode::JACK_INNER_DIAMETER;
 
-    QColor ringColor = parentNode_->categoryColor();
+    QColor ringColor = ringColor_;
+    if (!ringColor.isValid())
+        ringColor = parentNode() ? parentNode()->categoryColor() : QColor(Qt::gray);
     if (highlighted_)
         ringColor = ringColor.lighter(160);
 
