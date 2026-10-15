@@ -1,4 +1,5 @@
-#include "ModuleRegistry.h"
+#include "ModuleHelpers.h"
+#include "ModuleLibrary.h"
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -7,28 +8,7 @@ namespace OpenDaw::Modular {
 
 namespace {
 
-constexpr double kTwoPi = 6.283185307179586;
-constexpr double kC4Hz = 261.6255653005986;
-
-inline float clampf(float v, float lo, float hi) { return std::min(std::max(v, lo), hi); }
-
-// Band-limited step correction for saw/square edges.
-inline double polyBlep(double t, double dt)
-{
-    if (t < dt) { t /= dt; return t + t - t * t - 1.0; }
-    if (t > 1.0 - dt) { t = (t - 1.0) / dt; return t * t + t + t + 1.0; }
-    return 0.0;
-}
-
-// Fast deterministic white noise in -1..1.
-struct NoiseGen {
-    uint32_t state = 0x9E3779B9u;
-    float next()
-    {
-        state ^= state << 13; state ^= state >> 17; state ^= state << 5;
-        return static_cast<float>(state) * (2.0f / 4294967295.0f) - 1.0f;
-    }
-};
+using namespace detail;
 
 // ── Voice In / Voice Out / Voices / Output ──────────────────────────────────
 
@@ -348,25 +328,6 @@ private:
     NoiseGen noise_;
 };
 
-template <typename T> std::function<std::unique_ptr<Module>()> make()
-{
-    return [] { return std::make_unique<T>(); };
-}
-
-ParamDef param(std::string name, float min, float max, float def, std::string unit,
-               std::string description)
-{
-    return { std::move(name), min, max, def, std::move(unit), {}, std::move(description) };
-}
-
-ParamDef choice(std::string name, std::vector<std::string> choices, int def,
-                std::string description)
-{
-    const float max = static_cast<float>(choices.size() - 1);
-    return { std::move(name), 0.0f, max, static_cast<float>(def), "", std::move(choices),
-             std::move(description) };
-}
-
 std::vector<ModuleDef> buildRegistry()
 {
     using K = PortKind;
@@ -481,6 +442,9 @@ std::vector<ModuleDef> buildRegistry()
           param("rate", 0.01f, 40.0f, 2.0f, "Hz", "Speed") },
         make<Lfo>() });
 
+    addSequencingModules(defs);
+    addRandomModules(defs);
+    addFxModules(defs);
     return defs;
 }
 

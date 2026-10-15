@@ -165,7 +165,8 @@ void CompiledPatch::processInstance(Instance& inst, const Node& node, Voice* voi
                          node.params.data());
 }
 
-void CompiledPatch::renderSubBlock(int n, const float* macros, float* outL, float* outR)
+void CompiledPatch::renderSubBlock(int n, const float* macros, float* outL, float* outR,
+                                   const Transport& transport)
 {
     // Parameters: patch values, overridden by macros where mapped.
     for (auto& node : nodes_)
@@ -179,6 +180,7 @@ void CompiledPatch::renderSubBlock(int n, const float* macros, float* outL, floa
     gctx.sampleRate = sampleRate_;
     gctx.numSamples = n;
     gctx.modWheel = modWheel_;
+    gctx.transport = transport;
     gctx.voiceMix[0] = mixL_.data();
     gctx.voiceMix[1] = mixR_.data();
 
@@ -237,11 +239,15 @@ void CompiledPatch::renderSubBlock(int n, const float* macros, float* outL, floa
     }
 }
 
-void CompiledPatch::render(float* left, float* right, int numSamples, const float* macros)
+void CompiledPatch::render(float* left, float* right, int numSamples, const float* macros,
+                           const Transport& transport)
 {
+    const double beatsPerSample = transport.bpm / 60.0 / sampleRate_;
     for (int start = 0; start < numSamples; start += kSubBlock) {
         const int n = std::min(kSubBlock, numSamples - start);
-        renderSubBlock(n, macros, left + start, right + start);
+        Transport t = transport;
+        t.beat += start * beatsPerSample;
+        renderSubBlock(n, macros, left + start, right + start, t);
     }
 }
 

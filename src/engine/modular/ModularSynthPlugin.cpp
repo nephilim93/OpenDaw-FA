@@ -76,6 +76,8 @@ void ModularSynthPlugin::recompile()
 
 void ModularSynthPlugin::initialise(const te::PluginInitialisationInfo& info)
 {
+    tempoPosition_.emplace(te::createPosition(edit.tempoSequence));
+
     if (info.sampleRate > 0.0 && std::abs(info.sampleRate - sampleRate_) > 0.5) {
         sampleRate_ = info.sampleRate;
         recompile();
@@ -137,6 +139,16 @@ void ModularSynthPlugin::applyToBuffer(const te::PluginRenderContext& fc)
     if (!lock.isLocked() || !compiled_) return;  // a patch swap is in progress
     auto& cp = *compiled_;
 
+    Modular::Transport transport;
+    transport.playing = fc.isPlaying;
+    if (tempoPosition_) {
+        tempoPosition_->set(fc.editTime.getStart());
+        transport.bpm = tempoPosition_->getTempo();
+        transport.beat = tempoPosition_->getBeats().inBeats();
+        transport.beatsPerBar = tempoPosition_->getTimeSignature().numerator;
+    }
+    const double beatsPerSample = transport.bpm / 60.0 / sampleRate_;
+
     float macroValues[Modular::kNumMacros];
     for (int i = 0; i < Modular::kNumMacros; ++i)
         macroValues[i] = macros_[size_t(i)]->getCurrentValue();
@@ -148,7 +160,9 @@ void ModularSynthPlugin::applyToBuffer(const te::PluginRenderContext& fc)
             const int n = std::min(kRenderChunk, to - from);
             std::fill(renderL_.begin(), renderL_.begin() + n, 0.0f);
             std::fill(renderR_.begin(), renderR_.begin() + n, 0.0f);
-            cp.render(renderL_.data(), renderR_.data(), n, macroValues);
+            Modular::Transport t = transport;
+            t.beat += from * beatsPerSample;
+            cp.render(renderL_.data(), renderR_.data(), n, macroValues, t);
             if (dest) {
                 // Gentle limiter: transparent at normal levels, never above 1.
                 for (int i = 0; i < n; ++i) {

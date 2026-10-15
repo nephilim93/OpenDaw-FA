@@ -28,7 +28,8 @@ public:
     void setAftertouch(float value);
 
     // Adds the patch's output to left/right. macros: kNumMacros values, 0..1.
-    void render(float* left, float* right, int numSamples, const float* macros);
+    void render(float* left, float* right, int numSamples, const float* macros,
+                const Transport& transport = {});
 
     int numFeedbackCables() const { return numFeedback_; }
 
@@ -72,7 +73,8 @@ private:
     CompiledPatch() = default;
     void wireInstance(Instance& inst, const Node& node, Voice* voice);
     const float* sourceBuffer(const Source& s, Voice* voice) const;
-    void renderSubBlock(int n, const float* macros, float* outL, float* outR);
+    void renderSubBlock(int n, const float* macros, float* outL, float* outR,
+                        const Transport& transport);
     void processInstance(Instance& inst, const Node& node, Voice* voice,
                          const ProcessContext& ctx, int n);
     Voice* findVoiceFor(int note);

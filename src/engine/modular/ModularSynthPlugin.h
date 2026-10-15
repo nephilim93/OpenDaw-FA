@@ -4,6 +4,7 @@
 #include "modular/CompiledPatch.h"
 #include "modular/Patch.h"
 #include <memory>
+#include <optional>
 
 namespace OpenDaw {
 
@@ -56,6 +57,8 @@ private:
 
     Modular::Patch patch_;
     double sampleRate_ = 44100.0;
+    // Song tempo and position for the audio thread (as Tracktion's LFO does).
+    std::optional<tracktion::tempo::Sequence::Position> tempoPosition_;
 
     juce::SpinLock compiledLock_;
     std::unique_ptr<Modular::CompiledPatch> compiled_;

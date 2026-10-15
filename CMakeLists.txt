@@ -76,6 +76,8 @@ set(OpenDaw_SOURCES
     src/engine/midifx/VelocityFxPlugin.h src/engine/midifx/VelocityFxPlugin.cpp
     src/engine/modular/ModularSynthPlugin.h src/engine/modular/ModularSynthPlugin.cpp
     src/modular/Module.h src/modular/ModuleRegistry.h src/modular/Modules.cpp
+    src/modular/ModuleHelpers.h src/modular/ModuleLibrary.h
+    src/modular/ModulesSequencing.cpp src/modular/ModulesRandom.cpp src/modular/ModulesFx.cpp
     src/modular/Patch.h src/modular/Patch.cpp
     src/modular/CompiledPatch.h src/modular/CompiledPatch.cpp
     src/engine/PluginScanner.h      src/engine/PluginScanner.cpp

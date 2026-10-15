@@ -16,12 +16,21 @@ struct VoiceState {
     float aftertouch = 0.0f;  // 0..1
 };
 
+// The song's transport, for clocks and tempo-synced modules.
+struct Transport {
+    double bpm = 120.0;
+    double beat = 0.0;     // song position in beats (quarter notes)
+    bool playing = false;
+    int beatsPerBar = 4;
+};
+
 // Values shared by every module for one sub-block.
 struct ProcessContext {
     double sampleRate = 44100.0;
     int numSamples = kSubBlock;
     const VoiceState* voice = nullptr;  // null in the global section
     float modWheel = 0.0f;              // 0..1
+    Transport transport;                // beat = position at this sub-block's start
     // Voice section: where Voice Out adds this voice's sound.
     float* voiceOut[2] = { nullptr, nullptr };
     // Global section: the summed voices, read by the Voices module.
