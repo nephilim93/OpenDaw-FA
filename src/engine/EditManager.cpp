@@ -1,6 +1,7 @@
 #include "EditManager.h"
 #include "midifx/VelocityFxPlugin.h"
 #include <QSettings>
+#include <QTimer>
 #include "utils/FFmpegUtils.h"
 #include <juce_audio_formats/juce_audio_formats.h>
 #include <tracktion_engine/tracktion_engine.h>
@@ -1039,19 +1040,37 @@ void EditManager::assignMidiInputToTrack(te::AudioTrack& track,
     if (!edit_) return;
 
     clearTrackInputInternal(track);
-    edit_->getTransport().ensureContextAllocated();
 
-    for (auto* instance : edit_->getAllInputDevices()) {
-        if (instance->getInputDevice().getDeviceType() == te::InputDevice::physicalMidiDevice
-            && instance->getInputDevice().getName() == deviceName) {
-            instance->setTarget(track.itemID, true,
-                                &edit_->getUndoManager(), 0);
-            break;
+    // Choosing a controller enables it (it may have been plugged in after
+    // launch) and makes it play the track without arming.
+    auto& dm = audioEngine_.engine().getDeviceManager();
+    bool wasDisabled = false;
+    for (int i = 0; i < dm.getNumMidiInDevices(); ++i) {
+        if (auto dev = dm.getMidiInDevice(i); dev && dev->getName() == deviceName) {
+            wasDisabled = !dev->isEnabled();
+            dev->setEnabled(true);
+            dev->setMonitorMode(te::InputDevice::MonitorMode::on);
         }
     }
 
-    markDirtyAndNotify();
-    emit routingChanged();
+    auto assign = [this, itemID = track.itemID, deviceName]() {
+        if (!edit_) return false;
+        edit_->getTransport().ensureContextAllocated();
+        for (auto* instance : edit_->getAllInputDevices()) {
+            if (instance->getInputDevice().getDeviceType() == te::InputDevice::physicalMidiDevice
+                && instance->getInputDevice().getName() == deviceName) {
+                instance->setTarget(itemID, true, &edit_->getUndoManager(), 0);
+                markDirtyAndNotify();
+                emit routingChanged();
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // A device that was just enabled gets its edit input a moment later.
+    if (!assign() || wasDisabled)
+        QTimer::singleShot(300, this, [assign]() { assign(); });
 }
 
 QString EditManager::getTrackInputName(te::AudioTrack* track) const
