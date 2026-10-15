@@ -39,6 +39,7 @@ private:
     // A module in the patch, shared by all copies of its section.
     struct Node {
         const ModuleDef* def = nullptr;
+        std::shared_ptr<const ModuleDef> codeDef;  // keeps a code module's definition alive
         bool global = false;
         std::vector<std::vector<Source>> inputs;  // per input: cables into it
         std::vector<float> baseParams;

@@ -446,6 +446,7 @@ std::vector<ModuleDef> buildRegistry()
     addRandomModules(defs);
     addFxModules(defs);
     addExtraModules(defs);
+    addCodeModules(defs);
     return defs;
 }
 

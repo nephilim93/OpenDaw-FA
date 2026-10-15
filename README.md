@@ -533,6 +533,24 @@ c:\qt\6.10.2\msvc2022_64\bin\windeployqt.exe .\build\OpenDaw_artefacts\Debug\Ope
 .\build\OpenDaw_artefacts\Debug\OpenDaw.exe
 ```
 
+### Optional: Faust code modules
+
+The Modular Synth can run modules whose DSP is written in [Faust](https://faust.grame.fr) and compiled at runtime (the AI assistant writes them with its `write_modular_module` tool). This needs libfaust with its LLVM backend and is off by default. Without it, patches containing code modules still load, but those modules are silent and the patch reports a warning.
+
+```bash
+# macOS
+brew install faust
+# Ubuntu 24.04 / Debian (libfaust2 on older releases)
+sudo apt install faust libfaust2t64
+
+cmake -B build -G Ninja -DOPENDAW_WITH_FAUST=ON
+cmake --build build
+```
+
+CMake finds libfaust through pkg-config, falling back to the usual Homebrew and system paths. If it is installed somewhere else, pass `-DFAUST_INCLUDE_DIR=<dir containing faust/>` and `-DFAUST_LIBRARY=<path to libfaust>`. The Faust standard libraries (`stdfaust.lib`) are located the same way, or with `-DOPENDAW_FAUST_LIBRARY_DIR=<dir>`.
+
+To run the modular engine tests, including the Faust ones: `cmake -B build -DOPENDAW_BUILD_TESTS=ON -DOPENDAW_WITH_FAUST=ON && cmake --build build && ctest --test-dir build --output-on-failure`.
+
 ---
 
 ## How to Use OpenDaw
