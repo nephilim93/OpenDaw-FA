@@ -1,4 +1,5 @@
 #include "EditManager.h"
+#include "midifx/VelocityFxPlugin.h"
 #include <QSettings>
 #include "utils/FFmpegUtils.h"
 #include <juce_audio_formats/juce_audio_formats.h>
@@ -20,14 +21,20 @@ constexpr const char* kMonoUtilityPluginType = "airwindows_monoam";
 constexpr float kMonoUtilityModeValue = 0.1875f; // Mo Noam: (int)(0.1875*7.999)=1 => kMONO
 }
 
+static const juce::Identifier kMidiFxMarker("openDawMidiFx");
+
+static bool isInstrumentPlugin(te::Plugin* p)
+{
+    auto* ext = dynamic_cast<te::ExternalPlugin*>(p);
+    return ext && ext->isSynth() && !EditManager::isMidiFxPlugin(ext);
+}
+
 static bool hasInstrumentPlugin(te::AudioTrack* track)
 {
     if (!track) return false;
-    for (auto* p : track->pluginList.getPlugins()) {
-        if (auto* ext = dynamic_cast<te::ExternalPlugin*>(p))
-            if (ext->isSynth())
-                return true;
-    }
+    for (auto* p : track->pluginList.getPlugins())
+        if (isInstrumentPlugin(p))
+            return true;
     return false;
 }
 
@@ -711,12 +718,35 @@ void EditManager::setTrackMono(te::AudioTrack& track, bool mono)
 te::Plugin* EditManager::getTrackInstrument(te::AudioTrack* track) const
 {
     if (!track) return nullptr;
-    for (auto* p : track->pluginList.getPlugins()) {
-        if (auto* ext = dynamic_cast<te::ExternalPlugin*>(p))
-            if (ext->isSynth())
-                return ext;
-    }
+    for (auto* p : track->pluginList.getPlugins())
+        if (isInstrumentPlugin(p))
+            return p;
     return nullptr;
+}
+
+bool EditManager::isMidiFxPlugin(const te::Plugin* plugin)
+{
+    if (!plugin) return false;
+    return dynamic_cast<const VelocityFxPlugin*>(plugin) != nullptr
+        || plugin->state.getProperty(kMidiFxMarker, false);
+}
+
+// Inserts a MIDI FX after any existing ones and before the instrument, so
+// the chain runs MIDI FX -> instrument -> audio effects.
+void EditManager::addMidiFx(te::AudioTrack& track, te::Plugin::Ptr plugin)
+{
+    if (!plugin) return;
+    if (!dynamic_cast<VelocityFxPlugin*>(plugin.get()))
+        plugin->state.setProperty(kMidiFxMarker, true, nullptr);
+
+    int index = 0;
+    while (index < track.pluginList.size() && isMidiFxPlugin(track.pluginList[index]))
+        ++index;
+
+    track.pluginList.insertPlugin(plugin, index, nullptr);
+    markAsMidiTrack(&track);
+    markDirtyAndNotify();
+    emit tracksChanged();
 }
 
 void EditManager::setTrackInstrument(te::AudioTrack& track,
@@ -726,7 +756,11 @@ void EditManager::setTrackInstrument(te::AudioTrack& track,
 
     auto pluginState = te::ExternalPlugin::create(audioEngine_.engine(), desc);
     if (auto plugin = edit_->getPluginCache().createNewPlugin(pluginState)) {
-        track.pluginList.insertPlugin(plugin, 0, nullptr);
+        // After any MIDI FX, so they feed the instrument.
+        int index = 0;
+        while (index < track.pluginList.size() && isMidiFxPlugin(track.pluginList[index]))
+            ++index;
+        track.pluginList.insertPlugin(plugin, index, nullptr);
         markAsMidiTrack(&track);
         markDirtyAndNotify();
         emit tracksChanged();
@@ -735,12 +769,9 @@ void EditManager::setTrackInstrument(te::AudioTrack& track,
 
 void EditManager::removeTrackInstrument(te::AudioTrack& track)
 {
-    for (int i = track.pluginList.size() - 1; i >= 0; --i) {
-        if (auto* ext = dynamic_cast<te::ExternalPlugin*>(track.pluginList[i])) {
-            if (ext->isSynth())
-                ext->deleteFromParent();
-        }
-    }
+    for (int i = track.pluginList.size() - 1; i >= 0; --i)
+        if (isInstrumentPlugin(track.pluginList[i]))
+            track.pluginList[i]->deleteFromParent();
 }
 
 void EditManager::markAsMidiTrack(te::AudioTrack* track)

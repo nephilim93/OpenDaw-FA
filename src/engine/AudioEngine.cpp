@@ -1,4 +1,5 @@
 ﻿#include "AudioEngine.h"
+#include "midifx/VelocityFxPlugin.h"
 #include <QSettings>
 
 namespace OpenDaw {
@@ -48,6 +49,9 @@ AudioEngine::AudioEngine()
 #else
     engine_ = std::make_unique<te::Engine>("OpenDaw");
 #endif
+
+    // OpenDaw's own plugin types, so edits can create and reload them.
+    engine_->getPluginManager().createBuiltInType<VelocityFxPlugin>();
 }
 
 AudioEngine::~AudioEngine() = default;

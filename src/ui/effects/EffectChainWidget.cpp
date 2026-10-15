@@ -1,11 +1,14 @@
 #include "EffectChainWidget.h"
 #include "DelayEffectWidget.h"
 #include "EffectSelectorDialog.h"
+#include "VstSelectorDialog.h"
+#include "engine/midifx/VelocityFxPlugin.h"
 #include "PluginEditorWindow.h"
 #include "utils/ThemeManager.h"
 #include <QHBoxLayout>
 #include <QGridLayout>
 #include <QSignalBlocker>
+#include <QMenu>
 
 namespace OpenDaw {
 
@@ -321,24 +324,89 @@ void EffectChainWidget::rebuild()
         return;
     }
 
+    // MIDI tracks: MIDI FX first (they run before the instrument).
+    const bool midiTrack = track_ && editMgr_ && editMgr_->isMidiTrack(track_);
+    if (midiTrack) {
+        slotsLayout_->addWidget(makeSectionLabel("MIDI FX"));
+        for (auto* plugin : plist->getPlugins())
+            if (EditManager::isMidiFxPlugin(plugin))
+                addSlot(plugin);
+
+        auto& theme = ThemeManager::instance().current();
+        auto* addMidiBtn = new QPushButton("+ Add MIDI FX", slotsContainer_);
+        addMidiBtn->setAccessibleName("Add MIDI FX");
+        addMidiBtn->setFixedHeight(24);
+        addMidiBtn->setStyleSheet(
+            QString("QPushButton { background: %1; color: %2; border: 1px dashed %3; "
+                    "border-radius: 3px; font-size: 10px; }"
+                    "QPushButton:hover { background: %4; }")
+                .arg(theme.surface.name(), theme.accent.name(),
+                     theme.border.name(), theme.surfaceLight.name()));
+        connect(addMidiBtn, &QPushButton::clicked, this,
+                [this, addMidiBtn]() { showAddMidiFxMenu(addMidiBtn); });
+        slotsLayout_->addWidget(addMidiBtn);
+
+        slotsLayout_->addWidget(makeSectionLabel("Instrument & Effects"));
+    }
+
     for (auto* plugin : plist->getPlugins()) {
         if (dynamic_cast<te::VolumeAndPanPlugin*>(plugin)) continue;
         if (dynamic_cast<te::LevelMeterPlugin*>(plugin)) continue;
-
-        if (auto* delayPlugin = dynamic_cast<te::DelayPlugin*>(plugin)) {
-            auto* delayWidget = new DelayEffectWidget(
-                delayPlugin, editMgr_, slotsContainer_);
-            connect(delayWidget, &DelayEffectWidget::removeRequested,
-                    this, &EffectChainWidget::removeEffect);
-            slotsLayout_->addWidget(delayWidget);
-        } else {
-            auto* slot = new EffectSlotWidget(plugin, editMgr_, slotsContainer_);
-            connect(slot, &EffectSlotWidget::removeRequested,
-                    this, &EffectChainWidget::removeEffect);
-            slotsLayout_->addWidget(slot);
-        }
+        if (midiTrack && EditManager::isMidiFxPlugin(plugin)) continue;
+        addSlot(plugin);
     }
     slotsLayout_->addStretch();
+}
+
+void EffectChainWidget::addSlot(te::Plugin* plugin)
+{
+    if (auto* delayPlugin = dynamic_cast<te::DelayPlugin*>(plugin)) {
+        auto* delayWidget = new DelayEffectWidget(delayPlugin, editMgr_, slotsContainer_);
+        connect(delayWidget, &DelayEffectWidget::removeRequested,
+                this, &EffectChainWidget::removeEffect);
+        slotsLayout_->addWidget(delayWidget);
+    } else {
+        auto* slot = new EffectSlotWidget(plugin, editMgr_, slotsContainer_);
+        connect(slot, &EffectSlotWidget::removeRequested,
+                this, &EffectChainWidget::removeEffect);
+        slotsLayout_->addWidget(slot);
+    }
+}
+
+QLabel* EffectChainWidget::makeSectionLabel(const QString& text)
+{
+    auto& theme = ThemeManager::instance().current();
+    auto* label = new QLabel(text, slotsContainer_);
+    label->setStyleSheet(QString("font-size: 9px; font-weight: bold; color: %1; "
+                                 "padding: 6px 2px 2px 2px;").arg(theme.textDim.name()));
+    return label;
+}
+
+// Built-in MIDI FX, or any scanned plugin: plugins don't reliably mark
+// themselves as MIDI effects (many report as instruments), so all are offered.
+void EffectChainWidget::showAddMidiFxMenu(QWidget* anchor)
+{
+    if (!track_ || !editMgr_ || !editMgr_->edit()) return;
+
+    QMenu menu(this);
+    menu.addAction("Velocity", this, [this]() {
+        auto plugin = editMgr_->edit()->getPluginCache().createNewPlugin(
+            juce::String(VelocityFxPlugin::xmlTypeName), {});
+        editMgr_->addMidiFx(*track_, plugin);
+        rebuild();
+    });
+    menu.addSeparator();
+    auto* vstAction = menu.addAction("VST Plugin...", this, [this]() {
+        VstSelectorDialog dlg(*knownPlugins_, false, this);
+        dlg.setWindowTitle("Add MIDI FX Plugin");
+        if (dlg.exec() != QDialog::Accepted || !dlg.hasSelection()) return;
+        auto state = te::ExternalPlugin::create(editMgr_->edit()->engine, dlg.selectedPlugin());
+        editMgr_->addMidiFx(*track_, editMgr_->edit()->getPluginCache().createNewPlugin(state));
+        rebuild();
+    });
+    vstAction->setEnabled(knownPlugins_ != nullptr);
+
+    menu.exec(anchor->mapToGlobal(QPoint(0, anchor->height())));
 }
 
 void EffectChainWidget::addEffect(const QString& effectName)

@@ -64,6 +64,9 @@ public slots:
 private:
     void addEffect(const QString& effectName);
     void addVstEffect(const juce::PluginDescription& desc);
+    void showAddMidiFxMenu(QWidget* anchor);
+    void addSlot(te::Plugin* plugin);
+    QLabel* makeSectionLabel(const QString& text);
     void removeEffect(te::Plugin* plugin);
 
     te::PluginList* targetPluginList() const;

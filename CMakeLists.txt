@@ -73,6 +73,7 @@ set(OpenDaw_SOURCES
     src/app/JuceQtBridge.h          src/app/JuceQtBridge.cpp
     src/engine/AudioEngine.h        src/engine/AudioEngine.cpp
     src/engine/EditManager.h        src/engine/EditManager.cpp
+    src/engine/midifx/VelocityFxPlugin.h src/engine/midifx/VelocityFxPlugin.cpp
     src/engine/PluginScanner.h      src/engine/PluginScanner.cpp
     src/ui/MainWindow.h             src/ui/MainWindow.cpp
     src/ui/timeline/TimelineView.h  src/ui/timeline/TimelineView.cpp
