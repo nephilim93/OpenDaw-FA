@@ -269,3 +269,21 @@ if(OPENDAW_BUILD_MODULAR_EVAL)
     get_target_property(_od_libs OpenDaw LINK_LIBRARIES)
     target_link_libraries(OpenDawModularEval PRIVATE ${_od_libs})
 endif()
+
+# ── Modular engine tests (optional) ─────────────────────────────────────────
+# Headless checks of the modular synth engine. It only needs Qt Core, so the
+# tests link its sources directly: no audio device, GUI or API key.
+# Run with: ctest --test-dir build --output-on-failure
+option(OPENDAW_BUILD_TESTS "Build the modular engine test suite" OFF)
+if(OPENDAW_BUILD_TESTS)
+    enable_testing()
+    find_package(Qt6 REQUIRED COMPONENTS Core)
+    file(GLOB OpenDawModularTests_SOURCES CONFIGURE_DEPENDS
+         tests/modular/*.cpp src/modular/*.cpp)
+    add_executable(opendaw_modular_tests ${OpenDawModularTests_SOURCES} src/music/Theory.cpp)
+    target_include_directories(opendaw_modular_tests PRIVATE src)
+    target_link_libraries(opendaw_modular_tests PRIVATE Qt6::Core)
+    foreach(_group patch pitch envelope feedback voices sequencing random fx catalog)
+        add_test(NAME modular.${_group} COMMAND opendaw_modular_tests ${_group})
+    endforeach()
+endif()
