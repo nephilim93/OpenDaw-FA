@@ -17,8 +17,9 @@ std::unique_ptr<CompiledPatch> CompiledPatch::build(const Patch& patch, double s
     QHash<QString, int> indexOf;
     for (const auto& m : patch.modules) {
         Node node;
-        node.def = findModule(m.type.toStdString());
+        node.def = moduleDef(m);
         if (!node.def) return nullptr;
+        if (isCodeModule(m)) node.codeDef = m.codeDef;
         node.global = m.section == Section::Global;
         node.inputs.resize(node.def->inputs.size());
         for (int p = 0; p < int(node.def->params.size()); ++p)

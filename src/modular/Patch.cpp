@@ -78,7 +78,44 @@ Section defaultSection(const ModuleDef& def)
     return def.section == Section::Global ? Section::Global : Section::Voice;
 }
 
+// A code module whose definition is unknown (no Faust in this build, or the
+// code doesn't compile): its cables and parameters can't be checked, so
+// they are kept as written.
+bool unresolved(const PatchModule& m) { return isCodeModule(m) && !m.codeDef; }
+
+void compileCode(PatchModule& m)
+{
+    m.codeDef.reset();
+    m.codeError.clear();
+    if (!codeModulesAvailable() || m.code.trimmed().isEmpty()) return;
+    auto result = compileCodeModule(m.id.toStdString(), m.code.toStdString());
+    m.codeDef = std::move(result.def);
+    m.codeError = q(result.error);
+}
+
+// New modules go after the existing ones in their section unless op gives
+// a position.
+void placeModule(const Patch& p, PatchModule& m, const QJsonObject& op)
+{
+    float maxX = 0.0f;
+    for (const auto& other : p.modules)
+        if (other.section == m.section && other.id != m.id) maxX = std::max(maxX, other.x + 200.0f);
+    m.x = float(op["x"].toDouble(maxX));
+    m.y = float(op["y"].toDouble(m.section == Section::Global ? 460.0 : 40.0));
+}
+
 } // namespace
+
+bool isCodeModule(const PatchModule& m)
+{
+    return m.type == QLatin1String(kCodeModuleType);
+}
+
+const ModuleDef* moduleDef(const PatchModule& m)
+{
+    if (m.codeDef && isCodeModule(m)) return m.codeDef.get();
+    return findModule(m.type.toStdString());
+}
 
 std::optional<PortRef> parsePortRef(const QString& text)
 {
@@ -101,7 +138,7 @@ PatchModule* Patch::find(const QString& id)
 
 float Patch::paramValue(const PatchModule& m, int paramIndex) const
 {
-    const auto* def = findModule(m.type.toStdString());
+    const auto* def = moduleDef(m);
     if (!def || paramIndex < 0 || paramIndex >= int(def->params.size())) return 0.0f;
     const auto& pd = def->params[size_t(paramIndex)];
     return m.params.value(q(pd.name), pd.defaultValue);
@@ -114,12 +151,26 @@ std::optional<Patch> Patch::fromJson(const QJsonObject& json, QString* error)
     Patch patch;
     QString err;
 
-    for (const auto& mv : json["modules"].toArray()) {
+    // Refuse too many code modules before spending time compiling them.
+    const auto modulesJson = json["modules"].toArray();
+    const auto numCode = std::count_if(modulesJson.begin(), modulesJson.end(), [](const QJsonValue& v) {
+        return v.toObject()["type"].toString().trimmed() == QLatin1String(kCodeModuleType);
+    });
+    if (numCode > kMaxCodeModules) {
+        *error = QString("The patch has %1 code modules; the limit is %2.").arg(numCode).arg(kMaxCodeModules);
+        return std::nullopt;
+    }
+
+    for (const auto& mv : modulesJson) {
         const auto mo = mv.toObject();
         PatchModule m;
         m.id = mo["id"].toString().trimmed();
         m.type = mo["type"].toString().trimmed();
-        const auto* def = findModule(m.type.toStdString());
+        if (isCodeModule(m)) {
+            m.code = mo["code"].toString();
+            compileCode(m);  // errors are reported by validate()
+        }
+        const auto* def = moduleDef(m);
         if (!def) {
             *error = QString("Unknown module type '%1'. Available: %2.").arg(m.type, listTypes());
             return std::nullopt;
@@ -136,6 +187,14 @@ std::optional<Patch> Patch::fromJson(const QJsonObject& json, QString* error)
         }
         const auto params = mo["params"].toObject();
         for (auto it = params.begin(); it != params.end(); ++it) {
+            if (unresolved(m)) {
+                if (!it.value().isDouble()) {
+                    *error = QString("Module '%1': parameter '%2' needs a number.").arg(m.id, it.key());
+                    return std::nullopt;
+                }
+                m.params[it.key()] = float(it.value().toDouble());
+                continue;
+            }
             const int pi = def->paramIndex(it.key().toStdString());
             if (pi < 0) {
                 *error = QString("Module '%1' (%2) has no parameter '%3'. Parameters: %4.")
@@ -184,9 +243,11 @@ QJsonObject Patch::toJson() const
 {
     QJsonArray mods;
     for (const auto& m : modules) {
-        const auto* def = findModule(m.type.toStdString());
+        const auto* def = moduleDef(m);
         QJsonObject params;
-        if (def)
+        if (unresolved(m))
+            for (auto it = m.params.begin(); it != m.params.end(); ++it) params[it.key()] = it.value();
+        else if (def)
             for (auto it = m.params.begin(); it != m.params.end(); ++it) {
                 const int pi = def->paramIndex(it.key().toStdString());
                 if (pi >= 0) params[it.key()] = paramValueToJson(def->params[size_t(pi)], it.value());
@@ -195,6 +256,7 @@ QJsonObject Patch::toJson() const
                         { "section", m.section == Section::Global ? "global" : "voice" },
                         { "x", m.x }, { "y", m.y } };
         if (!params.isEmpty()) mo["params"] = params;
+        if (isCodeModule(m)) mo["code"] = m.code;
         mods.append(mo);
     }
 
@@ -220,6 +282,7 @@ QStringList Patch::validate() const
 {
     QStringList errors;
     QSet<QString> ids;
+    int codeModules = 0;
 
     for (const auto& m : modules) {
         if (m.id.isEmpty() || m.id.contains('.'))
@@ -228,12 +291,28 @@ QStringList Patch::validate() const
             errors << QString("Two modules share the id '%1'; ids must be unique.").arg(m.id);
         ids.insert(m.id);
 
-        const auto* def = findModule(m.type.toStdString());
+        if (isCodeModule(m)) {
+            ++codeModules;
+            if (m.code.trimmed().isEmpty())
+                errors << QString("Code module '%1' has no Faust code.").arg(m.id);
+            else if (m.code.toUtf8().size() > kMaxCodeSize)
+                errors << QString("Code module '%1' has %2 bytes of code; the limit is %3.")
+                              .arg(m.id).arg(m.code.toUtf8().size()).arg(kMaxCodeSize);
+            else if (!m.codeDef && codeModulesAvailable())
+                errors << QString("Code module '%1' doesn't compile: %2")
+                              .arg(m.id, m.codeError.isEmpty() ? QString("it was never compiled.")
+                                                               : m.codeError);
+        }
+
+        const auto* def = moduleDef(m);
         if (!def) { errors << QString("Unknown module type '%1'.").arg(m.type); continue; }
         if (!def->allowedIn(m.section))
             errors << QString("'%1' (%2) can only go in the %3 section.")
                           .arg(m.id, m.type, q(sectionName(def->section)));
     }
+    if (codeModules > kMaxCodeModules)
+        errors << QString("The patch has %1 code modules; the limit is %2.")
+                      .arg(codeModules).arg(kMaxCodeModules);
 
     for (const auto& c : cables) {
         const auto* src = find(c.from.module);
@@ -243,13 +322,13 @@ QStringList Patch::validate() const
                           .arg(c.from.toString(), c.to.toString());
             continue;
         }
-        const auto* sdef = findModule(src->type.toStdString());
-        const auto* ddef = findModule(dst->type.toStdString());
+        const auto* sdef = moduleDef(*src);
+        const auto* ddef = moduleDef(*dst);
         if (!sdef || !ddef) continue;
-        if (sdef->outputIndex(c.from.port.toStdString()) < 0)
+        if (!unresolved(*src) && sdef->outputIndex(c.from.port.toStdString()) < 0)
             errors << QString("'%1' (%2) has no output '%3'. Outputs: %4.")
                           .arg(src->id, src->type, c.from.port, listNames(sdef->outputs));
-        if (ddef->inputIndex(c.to.port.toStdString()) < 0)
+        if (!unresolved(*dst) && ddef->inputIndex(c.to.port.toStdString()) < 0)
             errors << QString("'%1' (%2) has no input '%3'. Inputs: %4.")
                           .arg(dst->id, dst->type, c.to.port, listNames(ddef->inputs));
         if (src->section == Section::Voice && dst->section == Section::Global)
@@ -261,7 +340,8 @@ QStringList Patch::validate() const
     for (int i = 0; i < kNumMacros; ++i)
         for (const auto& t : macros[size_t(i)].targets) {
             const auto* m = find(t.module);
-            const auto* def = m ? findModule(m->type.toStdString()) : nullptr;
+            const auto* def = m ? moduleDef(*m) : nullptr;
+            if (m && unresolved(*m)) continue;
             if (!def || def->paramIndex(t.param.toStdString()) < 0)
                 errors << QString("Macro %1 targets %2.%3, which doesn't exist.")
                               .arg(i + 1).arg(t.module, t.param);
@@ -297,6 +377,12 @@ QStringList Patch::warnings() const
         warnings << "Voice modules exist but there is no 'voice_out': voices are not heard.";
     if (hasType("voice_out", Section::Voice) && !hasType("voices", Section::Global))
         warnings << "There is a 'voice_out' but no global 'voices' module to collect it.";
+    if (!codeModulesAvailable())
+        for (const auto& m : modules)
+            if (isCodeModule(m))
+                warnings << QString("Code module '%1' is Faust code, but this build of OpenDaw has "
+                                    "no Faust support (OPENDAW_WITH_FAUST is off): it renders "
+                                    "silence.").arg(m.id);
     return warnings;
 }
 
@@ -343,6 +429,8 @@ QString opAddModule(Patch& p, const QJsonObject& op)
     const QString type = op["type"].toString().trimmed();
     const auto* def = findModule(type.toStdString());
     if (!def) return QString("Unknown module type '%1'. Available: %2.").arg(type, listTypes());
+    if (type == QLatin1String(kCodeModuleType))
+        return "Code modules are added with write_module {id, code} (the write_modular_module tool).";
     if (id.isEmpty()) return "add_module needs an \"id\" (e.g. \"vco2\").";
     if (p.find(id)) return QString("A module called '%1' already exists; pick another id.").arg(id);
 
@@ -356,12 +444,7 @@ QString opAddModule(Patch& p, const QJsonObject& op)
     } else {
         m.section = defaultSection(*def);
     }
-    // Place new modules after the existing ones unless a position is given.
-    float maxX = 0.0f;
-    for (const auto& other : p.modules)
-        if (other.section == m.section) maxX = std::max(maxX, other.x + 200.0f);
-    m.x = float(op["x"].toDouble(maxX));
-    m.y = float(op["y"].toDouble(m.section == Section::Global ? 460.0 : 40.0));
+    placeModule(p, m, op);
 
     const auto params = op["params"].toObject();
     for (auto it = params.begin(); it != params.end(); ++it) {
@@ -425,7 +508,10 @@ QString opSetParam(Patch& p, const QJsonObject& op)
 {
     auto* m = p.find(op["module"].toString());
     if (!m) return QString("No module called '%1'.").arg(op["module"].toString());
-    const auto* def = findModule(m->type.toStdString());
+    if (unresolved(*m))
+        return QString("'%1' is a code module whose Faust code isn't compiled, so its "
+                       "parameters can't be changed.").arg(m->id);
+    const auto* def = moduleDef(*m);
     const QString name = op["param"].toString();
     const int pi = def->paramIndex(name.toStdString());
     if (pi < 0)
@@ -454,6 +540,79 @@ QString opSetMacro(Patch& p, const QJsonObject& op)
     return {};
 }
 
+// Adds a code module or replaces its code. Parameters, cables and macro
+// targets that still fit the new code are kept; the rest are dropped.
+QString opWriteModule(Patch& p, const QJsonObject& op)
+{
+    const QString id = op["id"].toString().trimmed();
+    const QString code = op["code"].toString();
+    if (id.isEmpty()) return "write_module needs an \"id\" (e.g. \"fx1\").";
+    if (code.trimmed().isEmpty())
+        return "write_module needs \"code\": Faust source with a 'process = ...;' line.";
+    PatchModule* m = p.find(id);
+    if (m && !isCodeModule(*m))
+        return QString("'%1' is a %2 module, not a code module; pick another id.").arg(id, m->type);
+
+    std::optional<Section> section;
+    if (op.contains("section")) {
+        section = parseSection(op["section"].toString());
+        if (!section) return "section must be 'voice' or 'global'.";
+    }
+
+    const auto result = compileCodeModule(id.toStdString(), code.toStdString());
+    if (!result.def) return QString("Faust code for '%1' doesn't compile: %2").arg(id, q(result.error));
+    const ModuleDef& def = *result.def;
+
+    if (!m) {
+        PatchModule fresh;
+        fresh.id = id;
+        fresh.type = kCodeModuleType;
+        fresh.section = section.value_or(Section::Voice);
+        placeModule(p, fresh, op);
+        p.modules.append(fresh);
+        m = &p.modules.last();
+    } else if (section) {
+        m->section = *section;
+    }
+    m->code = code;
+    m->codeDef = result.def;
+    m->codeError.clear();
+
+    QMap<QString, float> kept;
+    for (auto it = m->params.begin(); it != m->params.end(); ++it) {
+        const int pi = def.paramIndex(it.key().toStdString());
+        if (pi < 0) continue;
+        const auto& pd = def.params[size_t(pi)];
+        kept[it.key()] = std::clamp(it.value(), pd.min, pd.max);
+    }
+    m->params = kept;
+    const auto params = op["params"].toObject();
+    for (auto it = params.begin(); it != params.end(); ++it) {
+        const int pi = def.paramIndex(it.key().toStdString());
+        if (pi < 0)
+            return QString("'%1' has no parameter '%2'. Parameters: %3.")
+                .arg(id, it.key(), listParams(def));
+        QString err;
+        auto v = parseParamValue(def.params[size_t(pi)], it.value(), &err);
+        if (!v) return err;
+        m->params[it.key()] = *v;
+    }
+
+    p.cables.erase(std::remove_if(p.cables.begin(), p.cables.end(), [&](const Cable& c) {
+                       return (c.from.module == id && def.outputIndex(c.from.port.toStdString()) < 0)
+                           || (c.to.module == id && def.inputIndex(c.to.port.toStdString()) < 0);
+                   }),
+                   p.cables.end());
+    for (auto& mac : p.macros)
+        mac.targets.erase(std::remove_if(mac.targets.begin(), mac.targets.end(),
+                                         [&](const MacroTarget& t) {
+                                             return t.module == id
+                                                 && def.paramIndex(t.param.toStdString()) < 0;
+                                         }),
+                          mac.targets.end());
+    return {};
+}
+
 QString opMoveModule(Patch& p, const QJsonObject& op)
 {
     auto* m = p.find(op["id"].toString());
@@ -479,8 +638,9 @@ QString applyOps(Patch& patch, const QJsonArray& ops)
         else if (name == "set_param")     err = opSetParam(work, op);
         else if (name == "set_macro")     err = opSetMacro(work, op);
         else if (name == "move_module")   err = opMoveModule(work, op);
+        else if (name == "write_module")  err = opWriteModule(work, op);
         else err = QString("Unknown op '%1'. Use add_module, remove_module, connect, "
-                           "disconnect, set_param, set_macro or move_module.").arg(name);
+                           "disconnect, set_param, set_macro, move_module or write_module.").arg(name);
         if (!err.isEmpty())
             return QString("Op %1 (%2): %3 No changes were made.").arg(i + 1).arg(name, err);
     }

@@ -58,6 +58,42 @@ else()
     set(FFMPEG_LINK_TARGET PkgConfig::FFMPEG)
 endif()
 
+# ── Faust (optional) ─────────────────────────────────────────────────────────
+# Modular Synth code modules compile Faust source at runtime with libfaust's
+# LLVM backend. Off: patches with code modules still load but render silence.
+option(OPENDAW_WITH_FAUST "Compile Faust code modules in the Modular Synth (needs libfaust)" OFF)
+add_library(opendaw_faust INTERFACE)
+if(OPENDAW_WITH_FAUST)
+    find_package(PkgConfig QUIET)
+    if(PkgConfig_FOUND)
+        pkg_check_modules(FAUST QUIET IMPORTED_TARGET faust)
+    endif()
+    if(FAUST_FOUND)
+        target_link_libraries(opendaw_faust INTERFACE PkgConfig::FAUST)
+    else()
+        find_path(FAUST_INCLUDE_DIR faust/dsp/llvm-dsp.h
+                  HINTS /opt/homebrew/include /usr/local/include)
+        find_library(FAUST_LIBRARY NAMES faust libfaust
+                     HINTS /opt/homebrew/lib /usr/local/lib)
+        if(NOT FAUST_INCLUDE_DIR OR NOT FAUST_LIBRARY)
+            message(FATAL_ERROR "OPENDAW_WITH_FAUST is ON but libfaust was not found. "
+                    "Install it (macOS: brew install faust; Ubuntu/Debian: apt install "
+                    "faust libfaust2t64) or set FAUST_INCLUDE_DIR and FAUST_LIBRARY.")
+        endif()
+        target_include_directories(opendaw_faust INTERFACE ${FAUST_INCLUDE_DIR})
+        target_link_libraries(opendaw_faust INTERFACE ${FAUST_LIBRARY})
+    endif()
+    # Where stdfaust.lib lives, for import("stdfaust.lib") in code modules.
+    find_path(OPENDAW_FAUST_LIBRARY_DIR stdfaust.lib
+              HINTS /opt/homebrew/share/faust /usr/local/share/faust /usr/share/faust)
+    target_compile_definitions(opendaw_faust INTERFACE OPENDAW_WITH_FAUST=1)
+    if(OPENDAW_FAUST_LIBRARY_DIR)
+        target_compile_definitions(opendaw_faust INTERFACE
+            OPENDAW_FAUST_LIBRARY_DIR="${OPENDAW_FAUST_LIBRARY_DIR}")
+    endif()
+    message(STATUS "Faust code modules: enabled (libraries: ${OPENDAW_FAUST_LIBRARY_DIR})")
+endif()
+
 # ── JUCE ─────────────────────────────────────────────────────────────────────
 set(JUCE_MODULES_ONLY OFF CACHE BOOL "" FORCE)
 add_subdirectory(libs/JUCE)
@@ -81,6 +117,7 @@ set(OpenDaw_SOURCES
     src/modular/ModulesExtra.cpp
     src/modular/Patch.h src/modular/Patch.cpp
     src/modular/CompiledPatch.h src/modular/CompiledPatch.cpp
+    src/modular/FaustModule.cpp
     src/engine/PluginScanner.h      src/engine/PluginScanner.cpp
     src/ui/MainWindow.h             src/ui/MainWindow.cpp
     src/ui/timeline/TimelineView.h  src/ui/timeline/TimelineView.cpp
@@ -236,6 +273,7 @@ target_link_libraries(OpenDaw PRIVATE
     juce::juce_core
     juce::juce_events
     juce::juce_recommended_warning_flags
+    opendaw_faust
     ${FFMPEG_LINK_TARGET})
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU")
@@ -286,8 +324,8 @@ if(OPENDAW_BUILD_TESTS)
          tests/modular/*.cpp src/modular/*.cpp)
     add_executable(opendaw_modular_tests ${OpenDawModularTests_SOURCES} src/music/Theory.cpp)
     target_include_directories(opendaw_modular_tests PRIVATE src)
-    target_link_libraries(opendaw_modular_tests PRIVATE Qt6::Core)
-    foreach(_group patch pitch envelope feedback voices sequencing random fx extra catalog)
+    target_link_libraries(opendaw_modular_tests PRIVATE Qt6::Core opendaw_faust)
+    foreach(_group patch pitch envelope feedback voices sequencing random fx extra catalog faust)
         add_test(NAME modular.${_group} COMMAND opendaw_modular_tests ${_group})
     endforeach()
 endif()

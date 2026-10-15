@@ -8,6 +8,7 @@
 #include <QStringList>
 #include <QVector>
 #include <array>
+#include <memory>
 #include <optional>
 
 namespace OpenDaw::Modular {
@@ -18,7 +19,19 @@ struct PatchModule {
     Section section = Section::Voice;   // Voice or Global (never Both)
     QMap<QString, float> params;        // only values that differ from defaults
     float x = 0.0f, y = 0.0f;           // editor position
+
+    // Code modules (type kCodeModuleType) only: the Faust source, and the
+    // definition compiled from it. codeDef is null when the code doesn't
+    // compile (codeError says why) or this build has no Faust support.
+    QString code;
+    std::shared_ptr<const ModuleDef> codeDef;
+    QString codeError;
 };
+
+// The definition a module follows: its compiled code for code modules
+// (the silent placeholder until compiled), the registry's otherwise.
+const ModuleDef* moduleDef(const PatchModule& m);
+bool isCodeModule(const PatchModule& m);
 
 struct PortRef {
     QString module, port;
@@ -69,8 +82,10 @@ struct Patch {
 std::optional<PortRef> parsePortRef(const QString& text);
 
 // Applies edit operations (add_module, remove_module, connect, disconnect,
-// set_param, set_macro, move_module). All-or-nothing: on any error the
-// patch is left unchanged and the error (with a fix hint) is returned.
+// set_param, set_macro, move_module, write_module). All-or-nothing: on any
+// error the patch is left unchanged and the error (with a fix hint) is
+// returned. write_module {id, code, section?, params?} adds a code module or
+// replaces its code; it compiles here, on the calling (message) thread.
 QString applyOps(Patch& patch, const QJsonArray& ops);
 
 // The module catalog as JSON, for the AI.

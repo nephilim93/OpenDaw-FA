@@ -333,7 +333,11 @@ const char* const AiService::kSystemPromptRules =
               "- Assign musically useful macros (e.g. Brightness -> vcf cutoff, Space -> reverb "
               "mix) with set_macro so the user can tweak and automate the sound.\n"
               "- Keep levels sane: several vcos into a mixer should use mixer levels around "
-              "0.3-0.5; effects mix 0.2-0.4 unless asked.\n";
+              "0.3-0.5; effects mix 0.2-0.4 unless asked.\n"
+              "- When no library module can do it (a particular filter, waveshaper, physical "
+              "model), write one in Faust with write_modular_module, then wire its returned "
+              "ports with edit_modular_patch. Prefer library modules otherwise. On a compile "
+              "error, fix the reported line and call it again.\n";
 
 // ── Conversation ────────────────────────────────────────────────────────────
 

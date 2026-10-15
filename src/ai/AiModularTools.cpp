@@ -76,6 +76,37 @@ QJsonObject patchSchema(const QString& description)
     return QJsonObject{ { "type", "object" }, { "description", description } };
 }
 
+// A code module's ports and parameters as compiled, so the AI can wire it.
+QJsonObject describeCodeModule(const Modular::PatchModule& m)
+{
+    QJsonObject out{ { "id", m.id }, { "section", m.section == Modular::Section::Global ? "global" : "voice" } };
+    const auto* def = Modular::moduleDef(m);
+    if (!def) return out;
+    QJsonArray inputs, outputs, params;
+    for (const auto& p : def->inputs) inputs.append(QString::fromStdString(p.name));
+    for (const auto& p : def->outputs) outputs.append(QString::fromStdString(p.name));
+    for (const auto& p : def->params) {
+        QJsonObject o{ { "name", QString::fromStdString(p.name) }, { "min", p.min },
+                       { "max", p.max }, { "default", p.defaultValue } };
+        if (!p.unit.empty()) o["unit"] = QString::fromStdString(p.unit);
+        params.append(o);
+    }
+    out["inputs"] = inputs;
+    out["outputs"] = outputs;
+    out["params"] = params;
+    return out;
+}
+
+const char* kCodeModuleHelp =
+    "Write Faust (https://faust.grame.fr) with a 'process = ...;' definition; "
+    "import(\"stdfaust.lib\") gives os., fi., ef., re., en., ba. and the rest. Its audio "
+    "inputs and outputs become ports: one input is 'in', several are 'in1'..'inN' (outputs "
+    "likewise 'out' or 'out1'..'outN'). Each hslider/vslider/nentry/button/checkbox becomes a "
+    "parameter named by its label, with its range and default; add [unit:Hz] to a label to "
+    "show a unit. Signals follow the Modular Synth conventions (pitch in octaves, 0 = C4), so "
+    "convert in the code, e.g. 261.626 * 2^pitch for Hz. ffunction, fconstant, fvariable and "
+    "soundfile are not allowed; at most 8 code modules per patch and 64 KB of code each.";
+
 } // namespace
 
 QJsonArray AiToolDefs::modularTools()
@@ -100,7 +131,8 @@ QJsonArray AiToolDefs::modularTools()
                 "Optional full patch: {\"modules\": [{\"id\", \"type\", \"section\" "
                 "(\"voice\"|\"global\", optional), \"params\": {name: value or choice name}}], "
                 "\"cables\": [{\"from\": \"id.port\", \"to\": \"id.port\"}], \"macros\": "
-                "[{\"name\", \"targets\": [{\"module\", \"param\", \"min\", \"max\"}]}]}.") },
+                "[{\"name\", \"targets\": [{\"module\", \"param\", \"min\", \"max\"}]}]}. "
+                "Code modules have type \"faust\" and their source in \"code\".") },
         },
         QJsonArray{ "track" }));
 
@@ -122,8 +154,9 @@ QJsonArray AiToolDefs::modularTools()
         { "properties", QJsonObject{
             { "op", QJsonObject{ { "type", "string" }, { "enum", QJsonArray{
                 "add_module", "remove_module", "connect", "disconnect", "set_param",
-                "set_macro", "move_module" } } } },
-            { "id", propOf("string", "add_module/remove_module/move_module: module id, e.g. \"vco2\".") },
+                "set_macro", "move_module", "write_module" } } } },
+            { "id", propOf("string", "add_module/remove_module/move_module/write_module: module id, e.g. \"vco2\".") },
+            { "code", propOf("string", "write_module: Faust source (see write_modular_module).") },
             { "type", propOf("string", "add_module: module type from list_modular_modules.") },
             { "section", propOf("string", "add_module: \"voice\" or \"global\" (default: the module's usual section).") },
             { "params", propOf("object", "add_module: initial parameter values.") },
@@ -148,10 +181,28 @@ QJsonArray AiToolDefs::modularTools()
         "error says how to fix it. Operations: add_module {id, type, section?, params?}, "
         "remove_module {id} (also removes its cables), connect {from, to}, disconnect {to, "
         "from?}, set_param {module, param, value}, set_macro {index, name, targets}, "
-        "move_module {id, x, y}. Batch related changes into one call.",
+        "move_module {id, x, y}, write_module {id, code, section?, params?} (a Faust code "
+        "module, as in write_modular_module). Batch related changes into one call.",
         QJsonObject{ { "track", trackRef() },
                      { "ops", QJsonObject{ { "type", "array" }, { "items", opItem } } } },
         QJsonArray{ "track", "ops" }));
+
+    tools.append(tool("write_modular_module",
+        QString("Add a code module to a track's Modular Synth patch, or replace the code of an "
+                "existing one, for DSP the module library lacks (a special filter, waveshaper, "
+                "physical model, ...). ") + kCodeModuleHelp
+            + " The code compiles immediately: a compile error is returned with its line "
+              "number and nothing changes. Replacing code keeps the cables and parameter values "
+              "that still fit and reports the ones dropped. The result lists the module's ports "
+              "and parameters; wire them with edit_modular_patch. Undoable.",
+        QJsonObject{
+            { "track", trackRef() },
+            { "id", propOf("string", "Module id, e.g. \"fold1\". An existing code module with this id is updated.") },
+            { "code", propOf("string", "The Faust source.") },
+            { "section", propOf("string", "\"voice\" (default for a new module: one instance per note) or \"global\".") },
+            { "params", propOf("object", "Optional parameter values by name, as in add_module.") },
+        },
+        QJsonArray{ "track", "id", "code" }));
 
     tools.append(tool("set_modular_macro",
         "Move one of the Modular Synth's 8 macro knobs (0..1). A macro sweeps the parameters "
@@ -245,6 +296,39 @@ void AiToolExecutor::registerModularHandlers()
         return ok(id, out);
     };
 
+    handlers_["write_modular_module"] = [this, findSynth, noSynth](const QJsonObject& input, const QString& id) -> AiToolResult {
+        auto* track = resolveTrack(input["track"]);
+        if (!track) return err(id, "Track not found.");
+        auto* synth = findSynth(track);
+        if (!synth) return noSynth(id, track);
+
+        const QString moduleId = input["id"].toString().trimmed();
+        QJsonObject op{ { "op", "write_module" }, { "id", moduleId }, { "code", input["code"] } };
+        for (const char* key : { "section", "params" })
+            if (input.contains(key)) op[key] = input[key];
+
+        const auto before = synth->patch();
+        auto patch = before;
+        const QString error = Modular::applyOps(patch, QJsonArray{ op });
+        if (!error.isEmpty()) return err(id, error);
+        synth->setPatch(patch, "AI: Write Modular Code Module");
+        emitEditChanged();
+
+        QJsonObject out = summarize(patch);
+        out["created"] = before.find(moduleId) == nullptr;
+        if (const auto* m = patch.find(moduleId)) out["module"] = describeCodeModule(*m);
+        QJsonArray dropped;
+        for (const auto& c : before.cables)
+            if (!patch.cables.contains(c))
+                dropped.append(c.from.toString() + " -> " + c.to.toString());
+        if (!dropped.isEmpty()) out["removed_cables"] = dropped;
+        int droppedTargets = 0;
+        for (int i = 0; i < Modular::kNumMacros; ++i)
+            droppedTargets += int(before.macros[size_t(i)].targets.size() - patch.macros[size_t(i)].targets.size());
+        if (droppedTargets > 0) out["removed_macro_targets"] = droppedTargets;
+        return ok(id, out);
+    };
+
     handlers_["set_modular_macro"] = [this, findSynth, noSynth](const QJsonObject& input, const QString& id) -> AiToolResult {
         auto* track = resolveTrack(input["track"]);
         if (!track) return err(id, "Track not found.");
@@ -260,7 +344,7 @@ void AiToolExecutor::registerModularHandlers()
         macro->setParameter(value, juce::sendNotification);
         emitEditChanged();
 
-        const auto& m = synth->patch().macros[size_t(index)];
+        const auto m = synth->patch().macros[size_t(index)];  // patch() returns a copy
         QJsonObject out{ { "index", index }, { "value", value }, { "name", m.name } };
         if (m.targets.isEmpty())
             out["warning"] = "This macro has no targets yet; assign some with set_macro.";

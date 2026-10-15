@@ -58,8 +58,16 @@ void ModularSynthPlugin::setPatch(const Modular::Patch& patch, const juce::Strin
 
 void ModularSynthPlugin::loadPatchFromState()
 {
+    // Faust code modules compile here, on the message thread.
     QString error;
     auto parsed = Modular::Patch::fromJson(parseJson(patchJson_.get()), &error);
+    if (!parsed)
+        juce::Logger::writeToLog("Modular Synth: the stored patch is invalid ("
+                                 + juce::String(error.toStdString()) + "); using the init patch.");
+    else if (!Modular::codeModulesAvailable())
+        for (const auto& warning : parsed->warnings())
+            if (warning.startsWith("Code module"))  // a code module this build can't run
+                juce::Logger::writeToLog("Modular Synth: " + juce::String(warning.toStdString()));
     patch_ = parsed ? *parsed : Modular::Patch::initPatch();
     recompile();
 }
