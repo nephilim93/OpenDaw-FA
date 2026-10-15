@@ -750,6 +750,10 @@ QJsonArray AiToolDefs::allTools()
             props, QJsonArray({"track", "clip_index"})));
     }
 
+    // ── Modular Synth ───────────────────────────────────────────────────────
+    for (const auto& t : modularTools())
+        tools.append(t);
+
     return tools;
 }
 

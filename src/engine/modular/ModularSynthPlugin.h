@@ -21,7 +21,12 @@ public:
 
     // Patch access (message thread).
     Modular::Patch patch() const { return patch_; }
-    // Stores the patch as one undo step named undoName.
+    te::AutomatableParameter* macro(int index) const
+    {
+        return index >= 0 && index < Modular::kNumMacros ? macros_[size_t(index)].get() : nullptr;
+    }
+    // Stores the patch as one undo step named undoName (empty: part of the
+    // caller's current undo step).
     void setPatch(const Modular::Patch& patch, const juce::String& undoName);
 
     juce::String getName() const override { return getPluginName(); }

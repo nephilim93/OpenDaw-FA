@@ -40,6 +40,7 @@ private:
     using Handler = std::function<AiToolResult(const QJsonObject&, const QString&)>;
     QMap<QString, Handler> handlers_;
     void registerHandlers();
+    void registerModularHandlers();  // AiModularTools.cpp
 
     EditManager* editMgr_;
     AudioEngine* audioEngine_;

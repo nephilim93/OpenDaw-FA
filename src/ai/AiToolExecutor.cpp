@@ -1538,6 +1538,8 @@ void AiToolExecutor::registerHandlers()
         result["remaining_notes"] = seq.getNotes().size();
         return ok(id, result);
     };
+
+    registerModularHandlers();
 }
 
 // ── Signal batching ─────────────────────────────────────────────────────────

@@ -256,10 +256,15 @@ AiContentBlock AiService::buildProjectSnapshot() const
             QString type = editMgr_->isBusTrack(t) ? "bus" :
                           editMgr_->isMidiTrack(t) ? "midi" : "audio";
             QString name = QString::fromStdString(t->getName().toStdString());
-            prompt += QString("  [%1] \"%2\" (%3)%4%5\n")
+            QString instrument;
+            if (type == "midi")
+                if (auto* instr = editMgr_->getTrackInstrument(t))
+                    instrument = QString(" instrument: %1").arg(
+                        QString::fromUtf8(instr->getName().toRawUTF8()));
+            prompt += QString("  [%1] \"%2\" (%3)%4%5%6\n")
                           .arg(i).arg(name, type,
                                t->isMuted(false) ? " MUTED" : "",
-                               t->isSolo(false) ? " SOLO" : "");
+                               t->isSolo(false) ? " SOLO" : "", instrument);
         }
     } else {
         prompt += "No project is open.\n";
@@ -308,7 +313,27 @@ const char* const AiService::kSystemPromptRules =
               "  C major diatonic triads: C Dm Em F G Am Bdim\n"
               "  A minor diatonic triads: Am Bdim C Dm Em F G\n"
               "- Double-check every note number against the key before submitting. If in doubt, stay diatonic.\n"
-              "- When writing drums (channel 10 / GM percussion), key constraints do not apply.\n";
+              "- When writing drums (channel 10 / GM percussion), key constraints do not apply.\n"
+              "\nModular Synth (OpenDaw's patchable instrument):\n"
+              "- Use it when the user asks you to design a sound, build a synth patch, or make a "
+              "generative/sequenced part. create_modular_synth loads it (optionally with a full "
+              "patch); edit_modular_patch changes it; get_modular_patch reads it. Call "
+              "list_modular_modules if unsure of a module's ports or parameters.\n"
+              "- Keep the voice path complete: voice_in.pitch -> oscillators, voice_in.gate -> "
+              "envelopes, ... -> voice_out, and global voices -> (effects) -> output. A tool "
+              "result listing warnings means the patch may be silent: fix them.\n"
+              "- Generative parts that play without MIDI notes go in the global section: "
+              "transport/clock -> step_sequencer -> quantizer -> vco/vcf/vca (section global) -> "
+              "output. The song must be playing for synced clocks to run.\n"
+              "- Sound-design starting points: bass = 1-2 saw/square vcos an octave apart, "
+              "lowpass vcf with low cutoff and an adsr on cutoff; pad = 2-3 detuned saws "
+              "(fine +/-7..12 cents), slow attack/release, slow lfo on cutoff, reverb; pluck = "
+              "short decay, sustain 0 on both vca and vcf envelopes; acid = square vco, "
+              "resonant lowpass (resonance 0.7-0.9), voice_in glide, envelope on cutoff.\n"
+              "- Assign musically useful macros (e.g. Brightness -> vcf cutoff, Space -> reverb "
+              "mix) with set_macro so the user can tweak and automate the sound.\n"
+              "- Keep levels sane: several vcos into a mixer should use mixer levels around "
+              "0.3-0.5; effects mix 0.2-0.4 unless asked.\n";
 
 // ── Conversation ────────────────────────────────────────────────────────────
 

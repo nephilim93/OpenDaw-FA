@@ -51,7 +51,7 @@ ModularSynthPlugin::~ModularSynthPlugin()
 
 void ModularSynthPlugin::setPatch(const Modular::Patch& patch, const juce::String& undoName)
 {
-    if (auto* um = getUndoManager())
+    if (auto* um = getUndoManager(); um && undoName.isNotEmpty())
         um->beginNewTransaction(undoName);
     patchJson_ = toJsonString(patch);  // valueTreePropertyChanged recompiles
 }
