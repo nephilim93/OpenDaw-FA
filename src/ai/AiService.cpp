@@ -507,7 +507,16 @@ void AiService::sendToApi()
     body["model"] = model();
     body["max_tokens"] = kMaxTokens;
     body["stream"] = true;
-    body["system"] = buildSystemPrompt();
+    // Prompt caching: the tools and system prompt never change within a
+    // conversation, so mark the end of that prefix explicitly, and let
+    // automatic caching follow the growing conversation. Repeated tokens on
+    // each tool round then bill at the cache-read rate.
+    body["system"] = QJsonArray{ QJsonObject{
+        { "type", "text" },
+        { "text", buildSystemPrompt() },
+        { "cache_control", QJsonObject{ { "type", "ephemeral" } } },
+    } };
+    body["cache_control"] = QJsonObject{ { "type", "ephemeral" } };
     body["tools"] = AiToolDefs::allTools();
 
     QJsonArray messages;
