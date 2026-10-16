@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <map>
 
 namespace OpenDaw::Modular {
 
@@ -328,6 +329,38 @@ private:
     NoiseGen noise_;
 };
 
+// Every module's family, in one place so the grouping is easy to review.
+void assignCategories(std::vector<ModuleDef>& defs)
+{
+    using C = Category;
+    static const std::map<std::string, Category> families = {
+        { "vco", C::Oscillators }, { "noise", C::Oscillators }, { "lfo", C::Oscillators },
+
+        { "vcf", C::Filters }, { "vca", C::Filters }, { "comb_filter", C::Filters },
+
+        { "adsr", C::Modulation }, { "envelope_follower", C::Modulation },
+        { "random", C::Modulation }, { "sample_hold", C::Modulation },
+
+        { "mixer", C::Utilities }, { "scale", C::Utilities }, { "slew", C::Utilities },
+        { "crossfade", C::Utilities }, { "comparator", C::Utilities },
+        { "logic", C::Utilities }, { "quantizer", C::Utilities },
+
+        { "transport", C::Sequencers }, { "clock", C::Sequencers },
+        { "clock_divider", C::Sequencers }, { "euclidean", C::Sequencers },
+        { "step_sequencer", C::Sequencers },
+
+        { "wavefolder", C::Effects }, { "ring_mod", C::Effects }, { "chorus", C::Effects },
+        { "delay", C::Effects }, { "reverb", C::Effects },
+
+        { "voice_in", C::Core }, { "voice_out", C::Core }, { "voices", C::Core },
+        { "output", C::Core },
+
+        { kCodeModuleType, C::Code },
+    };
+    for (auto& d : defs)
+        if (auto it = families.find(d.type); it != families.end()) d.category = it->second;
+}
+
 std::vector<ModuleDef> buildRegistry()
 {
     using K = PortKind;
@@ -447,6 +480,7 @@ std::vector<ModuleDef> buildRegistry()
     addFxModules(defs);
     addExtraModules(defs);
     addCodeModules(defs);
+    assignCategories(defs);
     return defs;
 }
 
@@ -492,6 +526,40 @@ const char* portKindName(PortKind k)
     case PortKind::Pitch: return "pitch";
     }
     return "audio";
+}
+
+const char* categoryName(Category c)
+{
+    switch (c) {
+    case Category::Unsorted:    return "unsorted";
+    case Category::Oscillators: return "oscillators";
+    case Category::Filters:     return "filters";
+    case Category::Modulation:  return "modulation";
+    case Category::Utilities:   return "utilities";
+    case Category::Sequencers:  return "sequencers";
+    case Category::Effects:     return "effects";
+    case Category::Voices:      return "voices";
+    case Category::Core:        return "core";
+    case Category::Code:        return "code";
+    }
+    return "unsorted";
+}
+
+const char* categoryLabel(Category c)
+{
+    switch (c) {
+    case Category::Unsorted:    return "Other";
+    case Category::Oscillators: return "Oscillators & LFOs";
+    case Category::Filters:     return "Filters & Amplifiers";
+    case Category::Modulation:  return "Envelopes & Modulation";
+    case Category::Utilities:   return "Mixers & Utilities";
+    case Category::Sequencers:  return "Sequencers & Clocks";
+    case Category::Effects:     return "Effects & Processors";
+    case Category::Voices:      return "Synthesizers & Voices";
+    case Category::Core:        return "Core & Interface";
+    case Category::Code:        return "Code (Faust)";
+    }
+    return "Other";
 }
 
 const char* sectionName(Section s)

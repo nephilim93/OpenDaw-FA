@@ -683,6 +683,7 @@ QJsonArray catalogJson()
             params.append(o);
         }
         out.append(QJsonObject{ { "type", q(d.type) }, { "section", sectionName(d.section) },
+                                { "category", categoryName(d.category) },
                                 { "description", q(d.description) },
                                 { "inputs", ports(d.inputs) }, { "outputs", ports(d.outputs) },
                                 { "params", params } });

@@ -339,6 +339,7 @@ CodeCompileResult buildDefinition(const std::string& name, const std::string& so
 
     auto def = std::make_shared<ModuleDef>();
     def->type = kCodeModuleType;
+    def->category = Category::Code;
     def->description = !meta.description.empty() ? meta.description
                        : !meta.name.empty()      ? "Faust code module: " + meta.name
                                                  : "Faust code module";

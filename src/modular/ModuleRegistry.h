@@ -11,6 +11,25 @@ namespace OpenDaw::Modular {
 enum class PortKind { Audio, CV, Gate, Pitch };
 enum class Section { Voice, Global, Both };
 
+// The module's family, for grouping in the editor's menu and the AI catalog.
+// Section says where a module may live; Category says what it is.
+enum class Category {
+    Unsorted,      // not assigned yet (a test fails if a module is left here)
+    Oscillators,   // oscillators & LFOs
+    Filters,       // filters & amplifiers
+    Modulation,    // envelopes & modulation sources
+    Utilities,     // mixers & utilities
+    Sequencers,    // sequencers & clocks
+    Effects,       // effects & processors
+    Voices,        // complete synth voices and drum modules
+    Core,          // the patch's interface: voice in/out, output
+    Code,          // Faust code modules
+};
+inline constexpr Category kAllCategories[] = {
+    Category::Oscillators, Category::Filters, Category::Modulation, Category::Utilities,
+    Category::Sequencers, Category::Effects, Category::Voices, Category::Core, Category::Code,
+};
+
 struct PortDef {
     std::string name;
     PortKind kind;
@@ -35,6 +54,7 @@ struct ModuleDef {
     std::vector<PortDef> outputs;
     std::vector<ParamDef> params;
     std::function<std::unique_ptr<Module>()> create;
+    Category category = Category::Unsorted;   // set by the registry's family table
 
     int inputIndex(const std::string& name) const;
     int outputIndex(const std::string& name) const;
@@ -72,5 +92,7 @@ CodeCompileResult compileCodeModule(const std::string& name, const std::string& 
 
 const char* portKindName(PortKind k);
 const char* sectionName(Section s);
+const char* categoryName(Category c);    // "oscillators", ... (for JSON)
+const char* categoryLabel(Category c);   // "Oscillators & LFOs", ... (for the UI)
 
 } // namespace OpenDaw::Modular

@@ -20,6 +20,8 @@ TEST(catalog, lists_every_module)
         CHECK_MSG(!entry["description"].toString().isEmpty(), type);
         CHECK_MSG(entry["section"].toString() == OpenDaw::Modular::sectionName(def.section), type);
         CHECK_MSG(OpenDaw::Modular::findModule(type) == &def, type);
+        CHECK_MSG(def.category != OpenDaw::Modular::Category::Unsorted, "no family for " + type);
+        CHECK_MSG(entry["category"].toString() == OpenDaw::Modular::categoryName(def.category), type);
         CHECK_MSG(def.create && def.create() != nullptr, type);
 
         auto checkPorts = [&](const char* key, const std::vector<OpenDaw::Modular::PortDef>& ports) {

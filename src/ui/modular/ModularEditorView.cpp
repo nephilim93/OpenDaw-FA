@@ -779,21 +779,25 @@ void ModularEditorView::showBackgroundMenu(const QPointF& scenePos, const QPoint
     QMenu menu(this);
     menu.setAccessibleName("Add Module Menu");
     auto* add = menu.addMenu("Add Module");
-    auto* voice = add->addMenu("Voice");
-    auto* global = add->addMenu("Global");
-    auto* both = add->addMenu(sectionAt(scenePos) == Modular::Section::Voice
-                                  ? "Voice or Global (adds to Voice here)"
-                                  : "Voice or Global (adds to Global here)");
-    for (const auto& def : Modular::allModules()) {
-        auto* target = def.section == Modular::Section::Voice  ? voice
-                     : def.section == Modular::Section::Global ? global : both;
-        const QString type = QString::fromStdString(def.type);
-        auto* action = target->addAction(type, this, [this, type, scenePos]() { addModule(type, scenePos); });
-        action->setToolTip(QString::fromStdString(def.description));
-    }
-    for (auto* m : { voice, global, both }) {
-        m->setToolTipsVisible(true);
-        m->setEnabled(!m->isEmpty());
+    add->setToolTipsVisible(true);
+    const auto here = sectionAt(scenePos);
+    for (const auto category : Modular::kAllCategories) {
+        QMenu* family = nullptr;
+        for (const auto& def : Modular::allModules()) {
+            // The placeholder is portless; code modules are added with their code.
+            if (def.category != category || def.type == Modular::kCodeModuleType) continue;
+            if (!family) {
+                family = add->addMenu(Modular::categoryLabel(category));
+                family->setToolTipsVisible(true);
+            }
+            // Say where a module will go when that isn't the zone clicked in.
+            const QString type = QString::fromStdString(def.type);
+            QString label = type;
+            if (!def.allowedIn(here))
+                label += def.section == Modular::Section::Voice ? "  (Voice)" : "  (Global)";
+            auto* action = family->addAction(label, this, [this, type, scenePos]() { addModule(type, scenePos); });
+            action->setToolTip(QString::fromStdString(def.description));
+        }
     }
     menu.exec(screenPos);
 }
