@@ -124,7 +124,13 @@ TEST(drums, invalid_kits_are_explained)
     fails(pads({ QJsonObject{ { "note", 36 }, { "source", "tape" } } }), "source must be");
     fails(pads({ QJsonObject{ { "note", 36 }, { "source", "sample" } } }), "without a sample file");
     fails(pads({ QJsonObject{ { "note", 200 }, { "module", "kick" } } }), "outside MIDI");
-    CHECK(D::synthPadModules().contains("kick") && !D::synthPadModules().contains("vco"));
+    // Pads take drum voices only, not other modules that happen to have a trigger input.
+    const QStringList voices = D::synthPadModules();
+    for (const char* drum : { "kick", "snare", "hihat", "clap", "tom", "cymbal", "rimshot", "cowbell" })
+        CHECK_MSG(voices.contains(drum), drum);
+    for (const char* other : { "vco", "sample_hold", "random", "fm_voice" })
+        CHECK_MSG(!voices.contains(other), other);
+    fails(pads({ QJsonObject{ { "note", 36 }, { "module", "sample_hold" } } }), "can't be a synth pad");
 }
 
 TEST(drums, synth_pad_matches_its_module)
