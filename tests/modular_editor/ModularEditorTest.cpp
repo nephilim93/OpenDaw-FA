@@ -197,6 +197,28 @@ int main(int argc, char** argv)
     EXPECT(view.synth() == synth);
     EXPECT(std::abs(view.zoomLevel() - zoomed) < 1e-6);
 
+    // ── A code module shows its compiled ports, knobs and cables ──
+    if (M::codeModulesAvailable()) {
+        std::printf("code module\n");
+        auto coded = M::Patch::initPatch();
+        const QString code = "import(\"stdfaust.lib\");\n"
+                             "mix = hslider(\"mix\", 0.5, 0, 1, 0.01);\n"
+                             "process = *(mix);";
+        EXPECT(M::applyOps(coded, {
+            QJsonObject{ { "op", "disconnect" }, { "from", "vcf1.out" }, { "to", "vca1.in" } },
+            QJsonObject{ { "op", "write_module" }, { "id", "crusher" }, { "code", code } },
+            QJsonObject{ { "op", "connect" }, { "from", "vcf1.out" }, { "to", "crusher.in" } },
+            QJsonObject{ { "op", "connect" }, { "from", "crusher.out" }, { "to", "vca1.in" } },
+        }).isEmpty());
+        synth->setPatch(coded, "AI: Edit Modular Patch");
+        settle();
+        auto* crusher = view.panel("crusher");
+        EXPECT(crusher != nullptr);
+        EXPECT(crusher && crusher->findJack("in", true) && crusher->findJack("out", false));
+        EXPECT(crusher && crusher->knob("mix"));
+        EXPECT(view.cableItemCount() == int(coded.cables.size()));
+    }
+
     // ── Losing the instrument shows the empty state ──
     std::printf("empty state\n");
     editMgr.removeTrackInstrument(*track);
