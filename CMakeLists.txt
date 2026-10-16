@@ -193,6 +193,7 @@ set(OpenDaw_SOURCES
     src/ai/AiService.h             src/ai/AiService.cpp
     src/ai/AiOpenAiCompat.h src/ai/AiOpenAiCompat.cpp
     src/ai/AiModularTools.cpp
+    src/ai/AiDrumTools.cpp
     src/ai/AiChatStore.h           src/ai/AiChatStore.cpp
     src/ai/AiChatWidget.h          src/ai/AiChatWidget.cpp
     src/ai/AiQuickPrompt.h         src/ai/AiQuickPrompt.cpp

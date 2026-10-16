@@ -1540,6 +1540,7 @@ void AiToolExecutor::registerHandlers()
     };
 
     registerModularHandlers();
+    registerDrumHandlers();
 }
 
 // ── Signal batching ─────────────────────────────────────────────────────────

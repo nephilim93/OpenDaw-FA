@@ -7,6 +7,8 @@
 #include "app/JuceQtBridge.h"
 #include "engine/AudioEngine.h"
 #include "engine/EditManager.h"
+#include "ai/AiToolExecutor.h"
+#include "engine/PluginScanner.h"
 #include "engine/drums/DrumMachinePlugin.h"
 #include "engine/modular/ModularSynthPlugin.h"
 #include "ui/controls/RotaryKnob.h"
@@ -18,6 +20,7 @@
 #include <QApplication>
 #include <QElapsedTimer>
 #include <QGraphicsView>
+#include <QJsonDocument>
 #include <QMouseEvent>
 #include <QPushButton>
 #include <cstdio>
@@ -384,6 +387,83 @@ int main(int argc, char** argv)
             EXPECT(drums->warnings().isEmpty());
             wav.deleteFile();
         }
+    }
+
+    // ── The Drum Machine AI tools, through the real tool executor ──
+    std::printf("drum AI tools\n");
+    {
+        PluginScanner scanner(engine);
+        AiToolExecutor tools(&editMgr, &engine, &scanner);
+        auto call = [&](const char* name, QJsonObject input) {
+            const auto r = tools.execute(AiToolCall{ "t1", name, input });
+            if (r.isError) std::printf("    (%s error: %s)\n", name, r.content.toUtf8().constData());
+            return std::make_pair(!r.isError, QJsonDocument::fromJson(r.content.toUtf8()).object());
+        };
+        auto* drumTrack = editMgr.addMidiTrack();
+        drumTrack->setName("Groove");
+        const int clipsBefore = drumTrack->getClips().size();
+
+        // An unknown style changes nothing and names the valid ones.
+        um.clearUndoHistory();
+        const auto r0 = tools.execute(AiToolCall{ "t0", "write_drum_pattern",
+                                                  QJsonObject{ { "track", "Groove" }, { "style", "polka" } } });
+        EXPECT(r0.isError && r0.content.contains("blues_shuffle"));
+        EXPECT(editMgr.getTrackInstrument(drumTrack) == nullptr && !um.canUndo());
+
+        // A groove on a track without an instrument loads the Drum Machine with it.
+        auto [ok1, r1] = call("write_drum_pattern", QJsonObject{ { "track", "Groove" }, { "style", "blues_shuffle" },
+                                                                 { "bars", 8 }, { "fill_every", 4 } });
+        EXPECT(ok1 && r1["drum_machine_created"].toBool());
+        auto* drums = dynamic_cast<DrumMachinePlugin*>(editMgr.getTrackInstrument(drumTrack));
+        EXPECT(drums != nullptr);
+        EXPECT(drumTrack->getClips().size() == clipsBefore + 1);
+        auto* clip = dynamic_cast<te::MidiClip*>(drumTrack->getClips().getLast());
+        EXPECT(clip && clip->getMidiChannel().getChannelNumber() == 10);
+        EXPECT(clip && clip->getSequence().getNumNotes() == r1["added"].toInt() && r1["added"].toInt() > 50);
+        EXPECT(r1["length_beats"].toDouble() == 32.0 && !r1.contains("missing_pads"));
+        EXPECT(countUndoSteps(um) == 1);
+        um.undo();
+        EXPECT(drumTrack->getClips().size() == clipsBefore);
+        EXPECT(editMgr.getTrackInstrument(drumTrack) == nullptr);   // one step undoes both
+        um.redo();
+        drums = dynamic_cast<DrumMachinePlugin*>(editMgr.getTrackInstrument(drumTrack));
+        clip = dynamic_cast<te::MidiClip*>(drumTrack->getClips().getLast());
+
+        // Writing into the clip again replaces the notes in its range.
+        auto [ok2, r2] = call("write_drum_pattern", QJsonObject{ { "track", "Groove" }, { "style", "rock" },
+                                                                 { "bars", 8 }, { "clip_index", clipsBefore } });
+        EXPECT(ok2 && clip && clip->getSequence().getNumNotes() == r2["added"].toInt());
+        EXPECT(!r2.contains("drum_machine_created"));
+
+        // Kit edits: tune a tom, add a pad, remove it, and refuse bad input.
+        auto [ok3, r3] = call("set_drum_pad", QJsonObject{ { "track", "Groove" }, { "note", 45 },
+                                                           { "params", QJsonObject{ { "tune", 100 } } } });
+        EXPECT(ok3 && drums && drums->kit().padForNote(45)->params.value("tune") == 100.0f);
+        EXPECT(drums && drums->kit().padForNote(45)->module == "tom");   // other fields kept
+        auto [ok4, r4] = call("set_drum_pad", QJsonObject{ { "track", "Groove" }, { "note", 75 }, { "module", "rimshot" } });
+        EXPECT(ok4 && drums && drums->kit().padForNote(75) && drums->kit().padForNote(75)->name == "Claves");
+        auto [ok5, r5] = call("set_drum_pad", QJsonObject{ { "track", "Groove" }, { "note", 75 }, { "remove", true } });
+        EXPECT(ok5 && drums && !drums->kit().padForNote(75));
+        const auto kitBefore = drums ? drums->kit().toJson() : QJsonObject();
+        EXPECT(!call("set_drum_pad", QJsonObject{ { "track", "Groove" }, { "note", 38 }, { "module", "vco" } }).first);
+        EXPECT(!call("set_drum_pad", QJsonObject{ { "track", "Groove" }, { "note", 38 }, { "source", "sample" },
+                                                  { "sample", "/nonexistent/snare.wav" } }).first);
+        EXPECT(drums && drums->kit().toJson() == kitBefore);
+
+        auto [ok6, r6] = call("get_drum_kit", QJsonObject{ { "track", "Groove" } });
+        bool hasTom = false;
+        for (const auto& v : r6["synth_voices"].toArray()) hasTom |= v.toObject()["type"] == "tom";
+        EXPECT(ok6 && hasTom && drums && r6["kit"].toObject()["pads"].toArray().size() == int(drums->kit().pads.size()));
+        auto [ok7, r7] = call("list_drum_styles", {});
+        EXPECT(ok7 && r7["styles"].toArray().size() >= 15);
+
+        // A track with another instrument keeps it, and the result says so.
+        auto* synthTrack = editMgr.addMidiTrack();
+        synthTrack->setName("Keys");
+        editMgr.setTrackModularSynth(*synthTrack);
+        auto [ok8, r8] = call("write_drum_pattern", QJsonObject{ { "track", "Keys" }, { "style", "funk" } });
+        EXPECT(ok8 && r8["note"].toString().contains("create_drum_machine"));
+        EXPECT(dynamic_cast<ModularSynthPlugin*>(editMgr.getTrackInstrument(synthTrack)) != nullptr);
     }
 
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);

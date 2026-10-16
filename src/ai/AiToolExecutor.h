@@ -41,6 +41,7 @@ private:
     QMap<QString, Handler> handlers_;
     void registerHandlers();
     void registerModularHandlers();  // AiModularTools.cpp
+    void registerDrumHandlers();     // AiDrumTools.cpp
 
     EditManager* editMgr_;
     AudioEngine* audioEngine_;
