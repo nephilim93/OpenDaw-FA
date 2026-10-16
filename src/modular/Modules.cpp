@@ -352,6 +352,9 @@ void assignCategories(std::vector<ModuleDef>& defs)
         { "wavefolder", C::Effects }, { "ring_mod", C::Effects }, { "chorus", C::Effects },
         { "delay", C::Effects }, { "reverb", C::Effects },
 
+        { "kick", C::Voices }, { "snare", C::Voices }, { "hihat", C::Voices },
+        { "fm_voice", C::Voices },
+
         { "voice_in", C::Core }, { "voice_out", C::Core }, { "voices", C::Core },
         { "output", C::Core },
 
@@ -479,6 +482,7 @@ std::vector<ModuleDef> buildRegistry()
     addRandomModules(defs);
     addFxModules(defs);
     addExtraModules(defs);
+    addVoiceModules(defs);
     addCodeModules(defs);
     assignCategories(defs);
     return defs;

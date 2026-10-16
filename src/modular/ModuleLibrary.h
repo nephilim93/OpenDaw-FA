@@ -10,6 +10,7 @@ void addSequencingModules(std::vector<ModuleDef>& defs);  // ModulesSequencing.c
 void addRandomModules(std::vector<ModuleDef>& defs);      // ModulesRandom.cpp
 void addFxModules(std::vector<ModuleDef>& defs);          // ModulesFx.cpp
 void addExtraModules(std::vector<ModuleDef>& defs);       // ModulesExtra.cpp
+void addVoiceModules(std::vector<ModuleDef>& defs);       // ModulesVoices.cpp
 void addCodeModules(std::vector<ModuleDef>& defs);        // FaustModule.cpp
 
 } // namespace OpenDaw::Modular
