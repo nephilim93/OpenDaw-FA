@@ -239,3 +239,99 @@ TEST(patch, warnings)
           cable("voices.left", "out.left") })).warnings();
     CHECK_MSG(modulation.isEmpty(), modulation.join(" | "));
 }
+
+TEST(patch, warning_fixes)
+{
+    // Applies the fix of the first issue mentioning `text`; returns the fixed patch.
+    auto fix = [](Patch p, const char* text) -> std::optional<Patch> {
+        for (const auto& issue : p.issues())
+            if (issue.text.contains(text)) {
+                CHECK_MSG(!issue.fixOps.isEmpty() && !issue.fixLabel.isEmpty(), issue.text);
+                const QString err = OpenDaw::Modular::applyOps(p, issue.fixOps);
+                CHECK_MSG(err.isEmpty(), err);
+                if (!err.isEmpty()) return std::nullopt;
+                return p;
+            }
+        CHECK_MSG(false, std::string("no issue: ") + text);
+        return std::nullopt;
+    };
+    auto feeder = [](const Patch& p, const char* module, const char* port) -> QString {
+        for (const auto& c : p.cables)
+            if (c.to.module == module && c.to.port == port) return c.from.toString();
+        return {};
+    };
+    auto voicePatch = [](QJsonArray extraModules, QJsonArray extraCables, bool stereo) {
+        QJsonArray modules{ mod("vin", "voice_in"), mod("osc", "vco"), mod("vout", "voice_out"),
+                            mod("voices", "voices", {}, "global"), mod("out", "output") };
+        QJsonArray cables{ cable("vin.pitch", "osc.pitch"), cable("osc.out", "vout.left"),
+                           cable("voices.left", "out.left") };
+        if (stereo) cables.append(cable("voices.right", "out.right"));
+        for (const auto& m : extraModules) modules.append(m);
+        for (const auto& c : extraCables) cables.append(c);
+        return patchFrom(patchJson(modules, cables));
+    };
+
+    // Mono output already fed by voices: a new mixer sums voices and the drum.
+    auto mono = fix(voicePatch({ mod("bd", "noise", {}, "global") }, { cable("bd.out", "vout.left") }, false),
+                    "'bd' is in the global section");
+    if (mono) {
+        CHECK_MSG(mono->warnings().isEmpty(), mono->warnings().join(" | "));
+        CHECK(feeder(*mono, "out", "left") == "mixer1.out");
+        CHECK(feeder(*mono, "mixer1", "in1") == "voices.left");
+        CHECK(feeder(*mono, "mixer1", "in2") == "bd.out");
+        CHECK(feeder(*mono, "vout", "left") == "osc.out");     // the voice is untouched
+        CHECK(mono->find("mixer1")->params.value("master") == 1.0f);   // no level drop
+        CHECK(feeder(*mono, "out", "right").isEmpty());        // right still copies left
+    }
+
+    // Stereo output, drum into both voice_out sides: one issue, one fix for both sides.
+    auto stereoIn = voicePatch({ mod("bd", "noise", {}, "global") },
+                               { cable("bd.out", "vout.right") }, true);
+    int bdIssues = 0;
+    for (const auto& issue : stereoIn.issues()) bdIssues += issue.text.contains("'bd'");
+    CHECK(bdIssues == 1);
+    auto stereo = fix(stereoIn, "'bd' is in the global section");
+    if (stereo) {
+        CHECK_MSG(stereo->warnings().isEmpty(), stereo->warnings().join(" | "));
+        CHECK(feeder(*stereo, "out", "left") == "mixer1.out" && feeder(*stereo, "out", "right") == "mixer2.out");
+        CHECK(feeder(*stereo, "mixer2", "in1") == "voices.right" && feeder(*stereo, "mixer2", "in2") == "bd.out");
+    }
+
+    // A mixer already feeding the output: the drum takes its next free input.
+    auto viaMixer = fix(patchFrom(patchJson(
+        { mod("vin", "voice_in"), mod("osc", "vco"), mod("vout", "voice_out"),
+          mod("voices", "voices", {}, "global"), mod("mix", "mixer", {}, "global"),
+          mod("hat", "noise", {}, "global"), mod("out", "output") },
+        { cable("vin.pitch", "osc.pitch"), cable("osc.out", "vout.left"), cable("voices.left", "mix.in1"),
+          cable("mix.out", "out.left"), cable("hat.out", "vout.left") })),
+        "'hat' is in the global section");
+    if (viaMixer) {
+        CHECK(feeder(*viaMixer, "mix", "in2") == "hat.out");
+        CHECK(viaMixer->find("mixer1") == nullptr);
+        CHECK_MSG(viaMixer->warnings().isEmpty(), viaMixer->warnings().join(" | "));
+    }
+
+    // Output not fed while a voices module exists: connect it.
+    auto unfed = fix(patchFrom(patchJson(
+        { mod("vin", "voice_in"), mod("osc", "vco"), mod("vout", "voice_out"),
+          mod("voices", "voices", {}, "global"), mod("out", "output") },
+        { cable("vin.pitch", "osc.pitch"), cable("osc.out", "vout.left") })),
+        "left input has no cable");
+    if (unfed) {
+        CHECK(feeder(*unfed, "out", "left") == "voices.left" && feeder(*unfed, "out", "right") == "voices.right");
+        CHECK_MSG(unfed->warnings().isEmpty(), unfed->warnings().join(" | "));
+    }
+
+    // voice_out with no voices module: add one and connect it.
+    auto noVoices = fix(patchFrom(patchJson(
+        { mod("vin", "voice_in"), mod("osc", "vco"), mod("vout", "voice_out"), mod("out", "output") },
+        { cable("vin.pitch", "osc.pitch"), cable("osc.out", "vout.left") })),
+        "no global 'voices'");
+    if (noVoices) {
+        CHECK(feeder(*noVoices, "out", "left") == "voices.left");
+        CHECK_MSG(noVoices->warnings().isEmpty(), noVoices->warnings().join(" | "));
+    }
+
+    // Warnings without a safe automatic fix carry none.
+    for (const auto& issue : Patch{}.issues()) CHECK(issue.fixOps.isEmpty());
+}

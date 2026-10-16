@@ -352,7 +352,68 @@ QStringList Patch::validate() const
 
 QStringList Patch::warnings() const
 {
-    QStringList warnings;
+    QStringList texts;
+    for (const auto& issue : issues()) texts << issue.text;
+    return texts;
+}
+
+namespace {
+
+QJsonObject cableOp(const char* op, const PortRef& from, const PortRef& to)
+{
+    return { { "op", op }, { "from", from.toString() }, { "to", to.toString() } };
+}
+
+// Ops that route `source` into the output's left side, and its right side if
+// that is cabled too: straight in when a side is free, into a free input of a
+// mixer already feeding it, or through a new mixer otherwise.
+QJsonArray routeToOutput(const Patch& p, const PatchModule& out, const PortRef& source)
+{
+    QJsonArray ops;
+    QSet<QString> takenIds;
+    auto freshId = [&](const QString& base) {
+        for (int n = 1;; ++n) {
+            const QString id = base + QString::number(n);
+            if (!p.find(id) && !takenIds.contains(id)) { takenIds.insert(id); return id; }
+        }
+    };
+    auto feederOf = [&](const QString& module, const QString& port) -> const Cable* {
+        for (const auto& c : p.cables)
+            if (c.to.module == module && c.to.port == port) return &c;
+        return nullptr;
+    };
+    for (const QString side : { QString("left"), QString("right") }) {
+        const Cable* feeder = feederOf(out.id, side);
+        if (side == "right" && !feeder) break;   // a free right side copies the left
+        const PortRef target{ out.id, side };
+        if (!feeder) { ops.append(cableOp("connect", source, target)); continue; }
+
+        const auto* mixer = p.find(feeder->from.module);
+        if (mixer && mixer->type == "mixer" && mixer->section == Section::Global) {
+            QString freeInput;
+            for (const char* in : { "in1", "in2", "in3", "in4" })
+                if (!feederOf(mixer->id, in)) { freeInput = in; break; }
+            if (!freeInput.isEmpty()) {
+                ops.append(cableOp("connect", source, { mixer->id, freeInput }));
+                continue;
+            }
+        }
+        const QString id = freshId("mixer");
+        ops.append(QJsonObject{ { "op", "add_module" }, { "id", id }, { "type", "mixer" },
+                                { "section", "global" }, { "params", QJsonObject{ { "master", 1.0 } } } });
+        ops.append(cableOp("disconnect", feeder->from, target));
+        ops.append(cableOp("connect", feeder->from, { id, "in1" }));
+        ops.append(cableOp("connect", source, { id, "in2" }));
+        ops.append(cableOp("connect", { id, "out" }, target));
+    }
+    return ops;
+}
+
+} // namespace
+
+QVector<PatchIssue> Patch::issues() const
+{
+    QVector<PatchIssue> warnings;
     auto hasType = [&](const char* type, Section s) {
         return std::any_of(modules.begin(), modules.end(), [&](const PatchModule& m) {
             return m.type == type && m.section == s;
@@ -363,37 +424,83 @@ QStringList Patch::warnings() const
                            [&](const Cable& c) { return c.to.module == id && c.to.port == port; });
     };
 
-    bool outputFed = false;
-    for (const auto& m : modules)
-        if (m.type == "output" && isConnected(m.id, "left")) outputFed = true;
-    if (!hasType("output", Section::Global))
-        warnings << "No 'output' module: the patch is silent.";
-    else if (!outputFed)
-        warnings << "The output's left input has no cable: the patch is silent.";
+    const PatchModule* output = nullptr;
+    const PatchModule* voices = nullptr;
+    for (const auto& m : modules) {
+        if (m.section != Section::Global) continue;
+        if (m.type == "output" && (!output || isConnected(m.id, "left"))) output = &m;
+        if (m.type == "voices" && !voices) voices = &m;
+    }
+    if (!output)
+        warnings << PatchIssue{ "No 'output' module: the patch is silent.", {}, {} };
+    else if (!isConnected(output->id, "left")) {
+        PatchIssue issue{ "The output's left input has no cable: the patch is silent.", {}, {} };
+        if (voices) {
+            issue.fixLabel = QString("Connect %1 to the output").arg(voices->id);
+            issue.fixOps = { cableOp("connect", { voices->id, "left" }, { output->id, "left" }) };
+            if (!isConnected(output->id, "right"))
+                issue.fixOps.append(cableOp("connect", { voices->id, "right" }, { output->id, "right" }));
+        }
+        warnings << issue;
+    }
 
     const bool anyVoice = std::any_of(modules.begin(), modules.end(),
                                       [](const PatchModule& m) { return m.section == Section::Voice; });
     if (anyVoice && !hasType("voice_out", Section::Voice))
-        warnings << "Voice modules exist but there is no 'voice_out': voices are not heard.";
-    if (hasType("voice_out", Section::Voice) && !hasType("voices", Section::Global))
-        warnings << "There is a 'voice_out' but no global 'voices' module to collect it.";
+        warnings << PatchIssue{ "Voice modules exist but there is no 'voice_out': voices are not heard.", {}, {} };
+    if (hasType("voice_out", Section::Voice) && !voices) {
+        PatchIssue issue{ "There is a 'voice_out' but no global 'voices' module to collect it.",
+                          "Add a voices module", {} };
+        QString id = "voices";
+        for (int n = 2; find(id); ++n) id = "voices" + QString::number(n);
+        issue.fixOps = { QJsonObject{ { "op", "add_module" }, { "id", id }, { "type", "voices" },
+                                      { "section", "global" } } };
+        if (output && !isConnected(output->id, "left")) {
+            issue.fixLabel = "Add a voices module and connect it to the output";
+            issue.fixOps.append(cableOp("connect", { id, "left" }, { output->id, "left" }));
+            if (!isConnected(output->id, "right"))
+                issue.fixOps.append(cableOp("connect", { id, "right" }, { output->id, "right" }));
+        }
+        warnings << issue;
+    }
     // A global signal into voice_out is copied into every playing voice, so it
     // is silent with no notes held and multiplied by the notes held otherwise.
+    QStringList globalSources;   // in cable order, each once
+    QMap<QString, QVector<Cable>> intoVoiceOut;
     for (const auto& c : cables) {
         const auto* src = find(c.from.module);
         const auto* dst = find(c.to.module);
-        if (src && dst && src->section == Section::Global && dst->type == "voice_out")
-            warnings << QString("'%1' is in the global section but feeds %2, which only sounds "
-                                "while notes play (once per note). Connect it to the output "
-                                "(or through a mixer) instead.")
-                            .arg(src->id, c.to.toString());
+        if (!src || !dst || src->section != Section::Global || dst->type != "voice_out") continue;
+        if (!intoVoiceOut.contains(src->id)) globalSources << src->id;
+        intoVoiceOut[src->id].append(c);
+    }
+    for (const auto& id : globalSources) {
+        const auto& feeds = intoVoiceOut[id];
+        QStringList targets;
+        for (const auto& c : feeds) targets << c.to.toString();
+        PatchIssue issue{ QString("'%1' is in the global section but feeds %2, which only sounds "
+                                  "while notes play (once per note). Connect it to the output "
+                                  "(or through a mixer) instead.")
+                              .arg(id, targets.join(" and ")), {}, {} };
+        if (output) {
+            issue.fixLabel = QString("Connect %1 to the output").arg(id);
+            // Route it as if its voice_out cables were already gone.
+            Patch without = *this;
+            for (const auto& c : feeds) {
+                issue.fixOps.append(cableOp("disconnect", c.from, c.to));
+                without.cables.removeAll(c);
+            }
+            for (const auto& op : routeToOutput(without, *output, feeds.first().from))
+                issue.fixOps.append(op);
+        }
+        warnings << issue;
     }
     if (!codeModulesAvailable())
         for (const auto& m : modules)
             if (isCodeModule(m))
-                warnings << QString("Code module '%1' is Faust code, but this build of OpenDaw has "
-                                    "no Faust support (OPENDAW_WITH_FAUST is off): it renders "
-                                    "silence.").arg(m.id);
+                warnings << PatchIssue{ QString("Code module '%1' is Faust code, but this build of "
+                                                "OpenDaw has no Faust support (OPENDAW_WITH_FAUST is "
+                                                "off): it renders silence.").arg(m.id), {}, {} };
     return warnings;
 }
 

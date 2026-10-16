@@ -61,6 +61,9 @@ public:
     int cableItemCount() const { return int(cables_.size()); }
     ModulePanelItem* panel(const QString& id) const;
     QString lastError() const { return lastError_; }
+    // The warning bar: its issues, and what its Fix buttons do (one undo step).
+    const QVector<Modular::PatchIssue>& issues() const { return issues_; }
+    bool applyIssueFix(int index);
     double zoomLevel() const { return view_->transform().m11(); }
 
 public slots:
@@ -122,7 +125,8 @@ private:
     QLabel* emptyLabel_ = nullptr;
     QPushButton* loadButton_ = nullptr;
     QLabel* titleLabel_ = nullptr;
-    QLabel* warningLabel_ = nullptr;
+    QWidget* warningBar_ = nullptr;
+    QVector<Modular::PatchIssue> issues_;   // what the warning bar shows
     QLabel* errorLabel_ = nullptr;
     QGraphicsScene* scene_ = nullptr;
     QGraphicsView* view_ = nullptr;

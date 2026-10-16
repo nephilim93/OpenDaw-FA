@@ -58,6 +58,14 @@ constexpr int kNumMacros = 8;
 
 // A modular patch: modules, cables and macros. Lives as JSON in the host
 // plugin's state; every edit (AI or editor) goes through applyOps().
+// A warning, and when it can be fixed automatically, the applyOps edit that
+// fixes it (fixOps empty otherwise).
+struct PatchIssue {
+    QString text;
+    QString fixLabel;    // e.g. "Connect kick1 to the output"
+    QJsonArray fixOps;
+};
+
 struct Patch {
     QVector<PatchModule> modules;
     QVector<Cable> cables;
@@ -69,6 +77,7 @@ struct Patch {
     // Errors make the patch unusable; warnings explain why it may be silent.
     QStringList validate() const;
     QStringList warnings() const;
+    QVector<PatchIssue> issues() const;   // the warnings, with fixes where possible
 
     const PatchModule* find(const QString& id) const;
     PatchModule* find(const QString& id);

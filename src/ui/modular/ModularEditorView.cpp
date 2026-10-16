@@ -125,12 +125,17 @@ ModularEditorView::ModularEditorView(EditManager* editMgr, QWidget* parent)
     header->addWidget(fitButton);
     editorLayout->addLayout(header);
 
-    warningLabel_ = new QLabel(editorPage);
-    warningLabel_->setAccessibleName("Patch Warnings");
-    warningLabel_->setWordWrap(true);
-    warningLabel_->setStyleSheet("background: #4a3f12; color: #ffd866; padding: 3px 8px; font-size: 11px;");
-    warningLabel_->hide();
-    editorLayout->addWidget(warningLabel_);
+    warningBar_ = new QWidget(editorPage);
+    warningBar_->setAccessibleName("Patch Warnings");
+    warningBar_->setObjectName("warningBar");
+    warningBar_->setStyleSheet("#warningBar { background: #4a3f12; }"
+                               "QLabel { color: #ffd866; font-size: 11px; }"
+                               "QPushButton { font-size: 11px; padding: 1px 10px; }");
+    auto* warningLayout = new QVBoxLayout(warningBar_);
+    warningLayout->setContentsMargins(8, 3, 8, 3);
+    warningLayout->setSpacing(2);
+    warningBar_->hide();
+    editorLayout->addWidget(warningBar_);
 
     scene_ = new QGraphicsScene(this);
     scene_->setItemIndexMethod(QGraphicsScene::NoIndex);
@@ -378,9 +383,30 @@ void ModularEditorView::updateSceneRect()
 
 void ModularEditorView::updateWarnings()
 {
-    const QStringList warnings = synth() ? patch_.warnings() : QStringList();
-    warningLabel_->setText(warnings.join("   •   "));
-    warningLabel_->setVisible(!warnings.isEmpty());
+    issues_ = synth() ? patch_.issues() : QVector<Modular::PatchIssue>();
+    auto* layout = warningBar_->layout();
+    while (auto* item = layout->takeAt(0)) {
+        delete item->widget();
+        delete item;
+    }
+    for (int i = 0; i < issues_.size(); ++i) {
+        const auto& issue = issues_[i];
+        auto* row = new QWidget(warningBar_);
+        auto* rowLayout = new QHBoxLayout(row);
+        rowLayout->setContentsMargins(0, 0, 0, 0);
+        auto* text = new QLabel(issue.text, row);
+        text->setWordWrap(true);
+        rowLayout->addWidget(text, 1);
+        if (!issue.fixOps.isEmpty()) {
+            auto* fix = new QPushButton("Fix", row);
+            fix->setAccessibleName("Fix: " + issue.fixLabel);
+            fix->setToolTip(issue.fixLabel);
+            connect(fix, &QPushButton::clicked, this, [this, i]() { applyIssueFix(i); });
+            rowLayout->addWidget(fix);
+        }
+        layout->addWidget(row);
+    }
+    warningBar_->setVisible(!issues_.isEmpty());
 }
 
 void ModularEditorView::zoomToFit()
@@ -548,6 +574,13 @@ void ModularEditorView::openCodeDialog(const QString& id, QPointF scenePos)
     };
     dialog->setSaveFunction(save);
     dialog->open();
+}
+
+bool ModularEditorView::applyIssueFix(int index)
+{
+    if (index < 0 || index >= issues_.size() || issues_[index].fixOps.isEmpty()) return false;
+    const auto issue = issues_[index];   // applyEdit rebuilds issues_
+    return applyEdit(issue.fixOps, "Fix: " + issue.fixLabel);
 }
 
 bool ModularEditorView::setParam(const QString& module, const QString& param, float value)

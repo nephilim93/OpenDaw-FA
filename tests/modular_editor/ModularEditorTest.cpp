@@ -18,6 +18,7 @@
 #include <QElapsedTimer>
 #include <QGraphicsView>
 #include <QMouseEvent>
+#include <QPushButton>
 #include <cstdio>
 
 using namespace OpenDaw;
@@ -199,6 +200,33 @@ int main(int argc, char** argv)
     settle();
     EXPECT(view.synth() == synth);
     EXPECT(std::abs(view.zoomLevel() - zoomed) < 1e-6);
+
+    // ── A warning's Fix button repairs the patch in one undo step ──
+    std::printf("warning fix button\n");
+    {
+        auto patch = M::Patch::initPatch();
+        EXPECT(M::applyOps(patch, {
+            QJsonObject{ { "op", "add_module" }, { "id", "hiss" }, { "type", "noise" }, { "section", "global" } },
+            QJsonObject{ { "op", "connect" }, { "from", "hiss.out" }, { "to", "voice_out.left" } },
+        }).isEmpty());
+        synth->setPatch(patch, {});
+        settle();
+        um.clearUndoHistory();
+        EXPECT(view.issues().size() == 1 && !view.issues()[0].fixOps.isEmpty());
+        QPushButton* fixButton = nullptr;
+        for (auto* b : view.findChildren<QPushButton*>())
+            if (b->accessibleName().startsWith("Fix: ") && b->isVisibleTo(&view)) fixButton = b;
+        EXPECT(fixButton != nullptr);
+        if (fixButton) fixButton->click();
+        settle();
+        EXPECT(synth->patch().warnings().isEmpty());
+        EXPECT(view.issues().isEmpty());
+        EXPECT(countUndoSteps(um) == 1);
+        EXPECT(um.getUndoDescription().startsWith("Fix: "));
+        um.undo();
+        settle();
+        EXPECT(view.issues().size() == 1);   // undo brings the warning back
+    }
 
     // ── A code module shows its compiled ports, knobs and cables ──
     if (M::codeModulesAvailable()) {
