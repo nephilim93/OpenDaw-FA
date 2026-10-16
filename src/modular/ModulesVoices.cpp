@@ -200,6 +200,245 @@ private:
     Svf filter_;
 };
 
+// ── Clap ────────────────────────────────────────────────────────────────────
+
+// A few band-passed noise bursts in quick succession (the "many hands"), the
+// last of which opens into a longer tail.
+class Clap : public Module {
+public:
+    static constexpr int kBursts = 4;
+
+    void prepare(double sr) override { sr_ = sr; }
+    void reset() override
+    {
+        trig_ = {}; filter_.reset();
+        burst_ = tail_ = 0.0f; burstsLeft_ = 0; untilBurst_ = 0;
+    }
+    void process(const ProcessContext& ctx, const float* const* in, const bool* connected,
+                 float* const* out, const float* p) override
+    {
+        filter_.set(p[0], 1.5, sr_);
+        const float spread = clampf(p[1], 0.002f, 0.05f);
+        const int spacing = std::max(1, static_cast<int>(spread * sr_));
+        // Each burst has died ~35 dB by the next, so the hits stay distinct.
+        const float burstCoef = tauCoef(spread / 4.0f, sr_);
+        const float tailCoef = decayCoef(p[2], sr_);
+        for (int i = 0; i < ctx.numSamples; ++i) {
+            if (trig_.rose(in[0][i])) {
+                level_ = accentLevel(connected, 1, in[1] + i);
+                burst_ = 1.0f;
+                tail_ = 0.0f;
+                burstsLeft_ = kBursts - 1;
+                untilBurst_ = spacing;
+            } else if (burstsLeft_ > 0 && --untilBurst_ <= 0) {
+                burst_ = 1.0f;
+                untilBurst_ = spacing;
+                if (--burstsLeft_ == 0) tail_ = 0.6f;
+            }
+            const float env = std::max(burst_, tail_);
+            // Unity-peak band-pass (k * band), boosted to make up for the narrow band.
+            const float band = filter_.k * filter_.process(noise_.next())[1];
+            out[0][i] = level_ * clampf(3.0f * band * env, -1.0f, 1.0f);
+            burst_ *= burstCoef;
+            tail_ *= tailCoef;
+        }
+    }
+private:
+    double sr_ = 44100.0;
+    float burst_ = 0.0f, tail_ = 0.0f, level_ = 1.0f;
+    int burstsLeft_ = 0, untilBurst_ = 0;
+    Trigger trig_;
+    NoiseGen noise_;
+    Svf filter_;
+};
+
+// ── Tom ─────────────────────────────────────────────────────────────────────
+
+class Tom : public Module {
+public:
+    void prepare(double sr) override { sr_ = sr; }
+    void reset() override { trig_ = {}; phase_ = 0.0; amp_ = pitchEnv_ = click_ = 0.0f; }
+    void process(const ProcessContext& ctx, const float* const* in, const bool* connected,
+                 float* const* out, const float* p) override
+    {
+        const float tune = p[0], sweep = p[1];
+        const float ampCoef = decayCoef(p[2], sr_);
+        const float attack = clampf(p[3], 0.0f, 1.0f);
+        // The drop is over within ~0.1 s whatever the decay, like a struck head.
+        const float pitchCoef = tauCoef(0.03f, sr_), clickCoef = tauCoef(0.004f, sr_);
+        for (int i = 0; i < ctx.numSamples; ++i) {
+            if (trig_.rose(in[0][i])) {
+                level_ = accentLevel(connected, 1, in[1] + i);
+                amp_ = pitchEnv_ = click_ = 1.0f;
+                phase_ = 0.0;
+            }
+            const double hz = tune * std::exp2(clampf(finiteOr0(in[2][i]), -4.0f, 4.0f)
+                                               + sweep * pitchEnv_);
+            phase_ += hz / sr_;
+            phase_ -= std::floor(phase_);
+            const float body = static_cast<float>(std::sin(kTwoPi * phase_)) * amp_;
+            out[0][i] = level_ * clampf(body + 0.5f * attack * click_ * noise_.next(), -1.0f, 1.0f);
+            amp_ *= ampCoef;
+            pitchEnv_ *= pitchCoef;
+            click_ *= clickCoef;
+        }
+    }
+private:
+    double sr_ = 44100.0, phase_ = 0.0;
+    float amp_ = 0.0f, pitchEnv_ = 0.0f, click_ = 0.0f, level_ = 1.0f;
+    Trigger trig_;
+    NoiseGen noise_;
+};
+
+// ── Cymbal ──────────────────────────────────────────────────────────────────
+
+// The hi-hat's metallic squares plus noise through a steep high-pass. A crash
+// is one long noisy wash; a ride's wash dies early and leaves a resonant ping
+// (and optionally a bell) ringing for the full decay.
+class Cymbal : public Module {
+public:
+    static constexpr std::array<double, 6> kMetalHz = { 205.3, 304.4, 369.6, 522.7, 540.0, 800.0 };
+    static constexpr double kBellHz = 2400.0, kBellRatio = 1.47;
+
+    void prepare(double sr) override { sr_ = sr; }
+    void reset() override
+    {
+        trig_ = {}; hp1_.reset(); hp2_.reset(); ping_.reset();
+        wash_ = ring_ = 0.0f; phases_.fill(0.0); bell1_ = bell2_ = 0.0;
+    }
+    void process(const ProcessContext& ctx, const float* const* in, const bool* connected,
+                 float* const* out, const float* p) override
+    {
+        const float color = p[1];
+        const bool ride = p[2] >= 0.5f;
+        const float bell = clampf(p[3], 0.0f, 1.0f);
+        hp1_.set(color, 0.7, sr_);
+        hp2_.set(color, 0.7, sr_);
+        ping_.set(color * 1.4, 8.0, sr_);
+        const float ringCoef = decayCoef(p[0], sr_);
+        const float washCoef = ride ? decayCoef(0.3f * p[0], sr_) : ringCoef;
+        const float noiseMix = ride ? 0.15f : 0.5f;
+        const float washGain = 1.4f, pingGain = ride ? 1.5f : 0.0f;
+        for (int i = 0; i < ctx.numSamples; ++i) {
+            if (trig_.rose(in[0][i])) {
+                level_ = accentLevel(connected, 1, in[1] + i);
+                wash_ = ring_ = 1.0f;
+            }
+            float squares = 0.0f;
+            for (size_t k = 0; k < kMetalHz.size(); ++k) {
+                phases_[k] += kMetalHz[k] / sr_;
+                phases_[k] -= std::floor(phases_[k]);
+                squares += phases_[k] < 0.5 ? 1.0f : -1.0f;
+            }
+            const float source = (1.0f - noiseMix) * squares / 6.0f + noiseMix * noise_.next();
+            const float high = hp2_.process(hp1_.process(source)[2])[2];
+            const float ping = ping_.k * ping_.process(high)[1];
+            bell1_ += kBellHz / sr_;
+            bell2_ += kBellHz * kBellRatio / sr_;
+            bell1_ -= std::floor(bell1_);
+            bell2_ -= std::floor(bell2_);
+            const float bellTone = static_cast<float>(std::sin(kTwoPi * bell1_)
+                                                      + 0.6 * std::sin(kTwoPi * bell2_)) / 1.6f;
+            const float x = washGain * high * wash_
+                          + (pingGain * ping + 0.6f * bell * bellTone) * ring_;
+            out[0][i] = level_ * clampf(x, -1.0f, 1.0f);
+            wash_ *= washCoef;
+            ring_ *= ringCoef;
+        }
+    }
+private:
+    double sr_ = 44100.0, bell1_ = 0.0, bell2_ = 0.0;
+    std::array<double, 6> phases_{};
+    float wash_ = 0.0f, ring_ = 0.0f, level_ = 1.0f;
+    Trigger trig_;
+    NoiseGen noise_;
+    Svf hp1_, hp2_, ping_;
+};
+
+// ── Rimshot ─────────────────────────────────────────────────────────────────
+
+// A click and a high, quickly damped tone with a weaker low partial (the
+// stick hitting the rim).
+class Rimshot : public Module {
+public:
+    void prepare(double sr) override { sr_ = sr; }
+    void reset() override { trig_ = {}; clickFilter_.reset(); phase1_ = phase2_ = 0.0; amp_ = click_ = 0.0f; }
+    void process(const ProcessContext& ctx, const float* const* in, const bool* connected,
+                 float* const* out, const float* p) override
+    {
+        const float tune = p[0];
+        const float ampCoef = decayCoef(p[1], sr_);
+        const float clickCoef = decayCoef(0.004f, sr_);
+        clickFilter_.set(3000.0, 0.7, sr_);
+        for (int i = 0; i < ctx.numSamples; ++i) {
+            if (trig_.rose(in[0][i])) {
+                level_ = accentLevel(connected, 1, in[1] + i);
+                amp_ = click_ = 1.0f;
+                phase1_ = phase2_ = 0.0;
+            }
+            phase1_ += tune / sr_;
+            phase2_ += tune * 0.27 / sr_;
+            phase1_ -= std::floor(phase1_);
+            phase2_ -= std::floor(phase2_);
+            const float tone = static_cast<float>(std::sin(kTwoPi * phase1_)
+                                                  + 0.4 * std::sin(kTwoPi * phase2_)) / 1.4f;
+            const float click = clickFilter_.process(noise_.next())[2];
+            out[0][i] = level_ * clampf(0.75f * tone * amp_ + 0.5f * click * click_, -1.0f, 1.0f);
+            amp_ *= ampCoef;
+            click_ *= clickCoef;
+        }
+    }
+private:
+    double sr_ = 44100.0, phase1_ = 0.0, phase2_ = 0.0;
+    float amp_ = 0.0f, click_ = 0.0f, level_ = 1.0f;
+    Trigger trig_;
+    NoiseGen noise_;
+    Svf clickFilter_;
+};
+
+// ── Cowbell ─────────────────────────────────────────────────────────────────
+
+// Two square waves a little under a fifth apart (540 and 800 Hz at the
+// default tune) through a band-pass.
+class Cowbell : public Module {
+public:
+    static constexpr double kUpperRatio = 800.0 / 540.0;
+
+    void prepare(double sr) override { sr_ = sr; }
+    void reset() override { trig_ = {}; filter_.reset(); phase1_ = phase2_ = 0.0; env_ = 0.0f; }
+    void process(const ProcessContext& ctx, const float* const* in, const bool* connected,
+                 float* const* out, const float* p) override
+    {
+        const double low = p[0], high = p[0] * kUpperRatio;
+        const float coef = decayCoef(p[1], sr_);
+        filter_.set(std::sqrt(low * high), 1.2, sr_);
+        const double dt1 = low / sr_, dt2 = high / sr_;
+        for (int i = 0; i < ctx.numSamples; ++i) {
+            if (trig_.rose(in[0][i])) {
+                level_ = accentLevel(connected, 1, in[1] + i);
+                env_ = 1.0f;
+                phase1_ = phase2_ = 0.0;
+            }
+            phase1_ += dt1;
+            phase2_ += dt2;
+            phase1_ -= std::floor(phase1_);
+            phase2_ -= std::floor(phase2_);
+            const double sq1 = (phase1_ < 0.5 ? 1.0 : -1.0) + polyBlep(phase1_, dt1)
+                             - polyBlep(std::fmod(phase1_ + 0.5, 1.0), dt1);
+            const double sq2 = (phase2_ < 0.5 ? 1.0 : -1.0) + polyBlep(phase2_, dt2)
+                             - polyBlep(std::fmod(phase2_ + 0.5, 1.0), dt2);
+            const float band = filter_.k * filter_.process(static_cast<float>(sq1 + sq2) * 0.5f)[1];
+            out[0][i] = level_ * clampf(0.9f * band * env_, -1.0f, 1.0f);
+            env_ *= coef;
+        }
+    }
+private:
+    double sr_ = 44100.0, phase1_ = 0.0, phase2_ = 0.0;
+    float env_ = 0.0f, level_ = 1.0f;
+    Trigger trig_;
+    Svf filter_;
+};
+
 // ── FM voice ────────────────────────────────────────────────────────────────
 
 // Two sine operators (modulator -> carrier) with an amplitude ADSR and a
@@ -313,6 +552,66 @@ void addVoiceModules(std::vector<ModuleDef>& defs)
           param("color", 3000.0f, 15000.0f, 8000.0f, "Hz", "High-pass cutoff; higher = thinner"),
           param("metal", 0.0f, 1.0f, 0.5f, "", "0 = noise, 1 = metallic squares") },
         make<HiHat>() });
+
+    defs.push_back({ "clap", "Hand clap: four band-passed noise bursts 'spread' seconds apart, "
+        "the last opening into a tail that fades in 'decay'. Fire it on beats 2 and 4, often "
+        "layered with a snare.",
+        Section::Both,
+        { { "trigger", K::Gate, "Hits on the rising edge" },
+          { "accent", K::CV, "0..1 level of each hit; full when unconnected" } },
+        { { "out", K::Audio, "-1..1" } },
+        { param("tone", 800.0f, 2500.0f, 1200.0f, "Hz", "Band-pass centre; higher = brighter"),
+          param("spread", 0.005f, 0.02f, 0.01f, "s", "Gap between the bursts; wider = looser"),
+          param("decay", 0.05f, 2.0f, 0.25f, "s", "Fade time of the tail (-60 dB)") },
+        make<Clap>() });
+
+    defs.push_back({ "tom", "Tom: a sine that drops 'sweep' octaves onto 'tune' on each "
+        "trigger, with an optional noise attack. For a kit use several at different tunes, "
+        "e.g. 80 Hz floor, 120 Hz low, 160 Hz mid, 220 Hz high.",
+        Section::Both,
+        { { "trigger", K::Gate, "Hits on the rising edge" },
+          { "accent", K::CV, "0..1 level of each hit; full when unconnected" },
+          { "pitch", K::Pitch, "Shifts tune by octaves (1/octave)" } },
+        { { "out", K::Audio, "-1..1" } },
+        { param("tune", 60.0f, 400.0f, 120.0f, "Hz", "The pitch it settles to"),
+          param("sweep", 0.0f, 2.0f, 0.5f, "octaves", "How far above tune the hit starts"),
+          param("decay", 0.05f, 2.0f, 0.4f, "s", "Time to fade to silence (-60 dB)"),
+          param("attack", 0.0f, 1.0f, 0.2f, "", "Noise on the attack; 0 = pure tone") },
+        make<Tom>() });
+
+    defs.push_back({ "cymbal", "Cymbal: metallic squares and noise through a steep high-pass. "
+        "kind crash = a long noisy wash for accents at phrase starts; ride = a short wash "
+        "over a ringing ping for steady eighths, with 'bell' for the ride bell.",
+        Section::Both,
+        { { "trigger", K::Gate, "Hits on the rising edge" },
+          { "accent", K::CV, "0..1 level of each hit; full when unconnected" } },
+        { { "out", K::Audio, "-1..1" } },
+        { param("decay", 0.2f, 6.0f, 1.5f, "s", "Fade time (-60 dB); a ride's wash fades in a third of it"),
+          param("color", 2000.0f, 12000.0f, 4000.0f, "Hz", "High-pass cutoff; higher = thinner"),
+          choice("kind", { "crash", "ride" }, 0, "crash = noisy wash, ride = defined ping"),
+          param("bell", 0.0f, 1.0f, 0.0f, "", "Bell tone at 2.4 kHz; for ride bell hits") },
+        make<Cymbal>() });
+
+    defs.push_back({ "rimshot", "Rimshot / side stick: a click and a short high tone. Use it "
+        "for cross-stick backbeats or accents between snare hits.",
+        Section::Both,
+        { { "trigger", K::Gate, "Hits on the rising edge" },
+          { "accent", K::CV, "0..1 level of each hit; full when unconnected" } },
+        { { "out", K::Audio, "-1..1" } },
+        { param("tune", 1000.0f, 3000.0f, 1700.0f, "Hz", "Pitch of the tone"),
+          param("decay", 0.005f, 0.2f, 0.04f, "s", "Fade time of the tone (-60 dB)") },
+        make<Rimshot>() });
+
+    defs.push_back({ "cowbell", "Cowbell: two square waves at 'tune' and 1.48 x tune (540 and "
+        "800 Hz by default) through a band-pass, with a short decay. Good for Latin and "
+        "disco patterns.",
+        Section::Both,
+        { { "trigger", K::Gate, "Hits on the rising edge" },
+          { "accent", K::CV, "0..1 level of each hit; full when unconnected" } },
+        { { "out", K::Audio, "-1..1" } },
+        { param("tune", 300.0f, 1000.0f, 540.0f, "Hz", "Lower of the two tones"),
+          param("decay", 0.02f, 1.0f, 0.15f, "s", "Fade time (-60 dB)") },
+        make<Cowbell>() });
 
     defs.push_back({ "fm_voice", "A complete 2-operator FM synth voice: a sine modulator at "
         "'ratio' times the pitch modulates a sine carrier, with an amplitude ADSR and a "
