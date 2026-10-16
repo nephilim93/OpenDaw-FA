@@ -523,6 +523,46 @@ int main(int argc, char** argv)
         EXPECT(view.lastError().contains("Synth 909"));
     }
 
+    // ── A folder of samples becomes a kit (menu, browser, or a folder drop) ──
+    std::printf("kit from folder\n");
+    {
+        const QString moved = QDir(tmp.path()).filePath("Moved Samples");
+        const QString pack = moved + "/Pack";
+        QDir().mkpath(pack + "/Hats");
+        for (const char* f : { "BD 1.wav", "SD.wav", "Hats/Closed.wav", "Hats/Open.wav", "Vox.wav" })
+            EXPECT(writeWav(juce::File(juce::String((pack + "/" + f).toStdString())), 0.1));
+        um.clearUndoHistory();
+        EXPECT(view.buildKitFromFolder(pack));
+        settle();
+        EXPECT(countUndoSteps(um) == 1);
+        EXPECT(um.getUndoDescription() == "Build Kit: Pack");
+        EXPECT(dm->kit().padForNote(D::Gm::Kick)->sample == "Pack/BD 1.wav");
+        EXPECT(dm->kit().padForNote(D::Gm::OpenHat)->sample == "Pack/Hats/Open.wav");
+        EXPECT(dm->kit().padForNote(D::Gm::Crash)->source == D::PadSource::Synth);   // no file: synth stays
+        EXPECT(dm->warnings().isEmpty());
+        EXPECT(view.lastError().contains("Vox.wav"));   // told what wasn't placed
+        EXPECT(view.padWidget(D::Gm::Snare) && view.padWidget(D::Gm::Snare)->sourceText() == "SD.wav");
+
+        um.undo();
+        settle();
+        EXPECT(dm->kit().padForNote(D::Gm::Kick)->sample != "Pack/BD 1.wav");
+        QWidget* area = nullptr;
+        for (auto* w : view.findChildren<QWidget*>())
+            if (w->accessibleName() == "Drum Pads") area = w;
+        if (area) drop(area, { QUrl::fromLocalFile(pack) });
+        settle();
+        EXPECT(dm->kit().padForNote(D::Gm::Kick)->sample == "Pack/BD 1.wav");
+        EXPECT(countUndoSteps(um) == 1);
+
+        // A folder with nothing recognisable changes nothing.
+        QDir().mkpath(moved + "/Junk");
+        EXPECT(writeWav(juce::File(juce::String((moved + "/Junk/Vox.wav").toStdString())), 0.1));
+        um.clearUndoHistory();
+        EXPECT(!view.buildKitFromFolder(moved + "/Junk"));
+        EXPECT(!um.canUndo());
+        EXPECT(view.lastError().contains("None of the 1"));
+    }
+
     // ── A track without a Drum Machine shows the Load button ──
     std::printf("empty state\n");
     {

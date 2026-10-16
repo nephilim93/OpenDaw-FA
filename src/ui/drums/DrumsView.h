@@ -54,6 +54,9 @@ public:
     // as one undo step.
     bool loadKitPreset(const QString& name);
     bool saveKitPreset(const QString& name, bool overwrite);
+    // Every sample in `folder` whose name says which drum it is, on its GM
+    // note (Drums::buildKitFromFolder), as one undo step.
+    bool buildKitFromFolder(const QString& folder);
 
     // Selects the pad (its editor shows) and plays it.
     void selectPad(int note, bool audition = true);

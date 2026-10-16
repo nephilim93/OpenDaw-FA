@@ -1,12 +1,14 @@
 #include "AiToolDefs.h"
 #include "AiToolExecutor.h"
 #include "drums/DrumKit.h"
+#include "drums/KitFromFolder.h"
 #include "drums/KitPresets.h"
 #include "drums/SampleLibrary.h"
 #include "engine/EditManager.h"
 #include "engine/drums/DrumMachinePlugin.h"
 #include "modular/Patch.h"
 #include "music/DrumPatterns.h"
+#include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QSet>
@@ -175,6 +177,31 @@ QJsonArray AiToolDefs::drumTools()
         },
         QJsonArray{ "track", "name" }));
 
+    tools.append(tool("list_drum_samples",
+        "List the audio files in the user's samples folder (or a subfolder), each with the drum "
+        "sound its name suggests (GM note), to find a kit's samples or pick specific ones for "
+        "set_drum_pad.",
+        QJsonObject{
+            { "folder", propOf("string", "A subfolder, relative to the samples folder (default: all of it).") },
+            { "filter", propOf("string", "Only paths containing this text (case doesn't matter), e.g. \"snare\".") },
+            { "limit", numberOf("At most this many files (default 200).", 1, 1000) },
+        },
+        QJsonArray{}));
+
+    tools.append(tool("build_drum_kit_from_folder",
+        "Build a Drum Machine kit from a folder of samples, as one undoable step, by reading the "
+        "file and folder names (kick, snare, hats, toms, cymbals, percussion). Notes no file "
+        "matches keep their synth voice unless fill_with_synth is false. The result says which "
+        "file each note got, the other candidates, and the files it couldn't place: fix those "
+        "with set_drum_pad. Loads a Drum Machine on a track without an instrument.",
+        QJsonObject{
+            { "track", trackRef() },
+            { "folder", propOf("string", "The folder, relative to the samples folder (e.g. \"Acoustic Kit\") or absolute.") },
+            { "fill_with_synth", propOf("boolean", "Keep synth pads on notes without a sample (default true).") },
+            { "save_as", propOf("string", "Also save the kit as a preset with this name.") },
+        },
+        QJsonArray{ "track", "folder" }));
+
     tools.append(tool("write_drum_pattern",
         "Write an idiomatic drum groove from the style library into a MIDI clip (GM drum notes "
         "on channel 10), as one undoable step: kick, snare, hats/ride, ghost notes, fills every "
@@ -277,6 +304,99 @@ void AiToolExecutor::registerDrumHandlers()
         if (!outside.isEmpty())
             out["outside_samples_folder"] = QString("These samples are outside the samples folder, so the preset "
                                                     "only finds them on this computer: %1.").arg(outside.join(", "));
+        return ok(id, out);
+    };
+
+    handlers_["list_drum_samples"] = [this](const QJsonObject& input, const QString& id) -> AiToolResult {
+        const QString samples = Drums::samplesFolder();
+        const QString sub = input["folder"].toString().trimmed();
+        const QString folder = Drums::resolveSamplePath(sub, samples);
+        if (!QFileInfo(sub.isEmpty() ? samples : folder).isDir())
+            return err(id, QString("No such folder: %1 (the samples folder is %2).")
+                               .arg(sub.isEmpty() ? samples : folder, samples));
+        const QString root = sub.isEmpty() ? samples : folder;
+        const QString filter = input["filter"].toString().trimmed();
+        const int limit = std::clamp(input["limit"].toInt(200), 1, 1000);
+        bool truncated = false;
+        QJsonArray files;
+        int matched = 0;
+        // Filter over a generous listing, so a narrow filter still finds deep files.
+        for (const auto& rel : Drums::listSampleFiles(root, 20000, &truncated)) {
+            if (!filter.isEmpty() && !rel.contains(filter, Qt::CaseInsensitive)) continue;
+            if (++matched > limit) continue;
+            QJsonObject f{ { "path", Drums::toKitPath(QDir(root).absoluteFilePath(rel), samples) } };
+            if (const auto note = Drums::guessDrumNote(rel)) f["guess"] = QString("%1 (%2)").arg(gmName(*note)).arg(*note);
+            files.append(f);
+        }
+        QJsonObject out{ { "samples_folder", samples }, { "files", files }, { "total", matched } };
+        if (matched > limit || truncated) out["truncated"] = true;
+        // The folders, so the model can name one for build_drum_kit_from_folder.
+        QJsonArray folders;
+        for (const auto& info : QDir(root).entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot, QDir::Name))
+            if (info.fileName() != "Kits")
+                folders.append(Drums::toKitPath(info.absoluteFilePath(), samples));
+        if (!folders.isEmpty()) out["subfolders"] = folders;
+        return ok(id, out);
+    };
+
+    handlers_["build_drum_kit_from_folder"] = [this, findDrums, noDrums](const QJsonObject& input, const QString& id) -> AiToolResult {
+        auto* track = resolveTrack(input["track"]);
+        if (!track) return err(id, "Track not found.");
+        const QString samples = Drums::samplesFolder();
+        const QString folder = Drums::resolveSamplePath(input["folder"].toString().trimmed(), samples);
+        if (input["folder"].toString().trimmed().isEmpty() || !QFileInfo(folder).isDir())
+            return err(id, QString("No such folder: %1. Give a folder relative to the samples folder (%2) "
+                                   "or absolute; list_drum_samples lists them.").arg(folder, samples));
+        const QString saveAs = input["save_as"].toString().trimmed();
+        if (!saveAs.isEmpty()) {
+            if (const QString e = Drums::kitPresetNameError(saveAs); !e.isEmpty()) return err(id, e + " Nothing was changed.");
+            if (Drums::findKitPreset(saveAs, samples))
+                return err(id, QString("A kit preset named '%1' already exists; pick another save_as. Nothing was changed.").arg(saveAs));
+        }
+        const auto fk = Drums::buildKitFromFolder(folder, samples, input["fill_with_synth"].toBool(true));
+        if (fk.chosen.isEmpty())
+            return err(id, QString("None of the %1 audio files in %2 has a name that says which drum it is. "
+                                   "Use list_drum_samples and set_drum_pad to place them. Nothing was changed.")
+                               .arg(fk.sampleCount).arg(folder));
+        auto* drums = findDrums(track);
+        if (!drums && editMgr_->getTrackInstrument(track)) return noDrums(id, track);
+
+        editMgr_->edit()->getUndoManager().beginNewTransaction("AI: Build Drum Kit");
+        QJsonObject out;
+        if (!drums) {
+            drums = dynamic_cast<DrumMachinePlugin*>(editMgr_->setTrackDrumMachine(*track));
+            if (!drums) return err(id, "Could not create the Drum Machine.");
+            out["drum_machine_created"] = true;
+            emitTracksChanged();
+        }
+        drums->setKit(fk.kit, {});
+        emitEditChanged();
+
+        QJsonArray mapped;
+        for (auto it = fk.chosen.begin(); it != fk.chosen.end(); ++it) {
+            QJsonObject m{ { "note", it.key() }, { "name", gmName(it.key()) }, { "sample", it.value() } };
+            const auto alts = fk.alternatives.value(it.key());
+            if (!alts.isEmpty()) {
+                m["other_candidates"] = QJsonArray::fromStringList(alts.mid(0, 8));
+                if (alts.size() > 8) m["more_candidates"] = int(alts.size()) - 8;
+            }
+            mapped.append(m);
+        }
+        out["mapped"] = mapped;
+        out["samples_looked_at"] = fk.sampleCount;
+        if (!fk.unmatched.isEmpty()) {
+            QJsonArray unmatched;
+            for (const auto& u : fk.unmatched.mid(0, 40))
+                unmatched.append(Drums::toKitPath(QDir(folder).absoluteFilePath(u), samples));
+            out["unmatched"] = unmatched;
+            if (fk.unmatched.size() > 40) out["more_unmatched"] = int(fk.unmatched.size()) - 40;
+        }
+        if (!drums->warnings().isEmpty()) out["warnings"] = QJsonArray::fromStringList(drums->warnings());
+        if (!saveAs.isEmpty()) {
+            QString error;
+            if (Drums::saveKitPreset(drums->kit(), saveAs, samples, false, &error)) out["saved_preset"] = saveAs;
+            else out["save_error"] = error;
+        }
         return ok(id, out);
     };
 

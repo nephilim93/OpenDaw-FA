@@ -194,6 +194,7 @@ set(OpenDaw_SOURCES
     src/drums/DrumEngine.h         src/drums/DrumEngine.cpp
     src/drums/SampleLibrary.h      src/drums/SampleLibrary.cpp
     src/drums/KitPresets.h         src/drums/KitPresets.cpp
+    src/drums/KitFromFolder.h      src/drums/KitFromFolder.cpp
     src/engine/drums/DrumMachinePlugin.h src/engine/drums/DrumMachinePlugin.cpp
     src/ai/AiTypes.h
     src/ai/AiAudioAnalysis.h      src/ai/AiAudioAnalysis.cpp

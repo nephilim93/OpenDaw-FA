@@ -1,6 +1,7 @@
 #include "../modular/TestHarness.h"
 #include "drums/DrumEngine.h"
 #include "drums/DrumKit.h"
+#include "drums/KitFromFolder.h"
 #include "drums/KitPresets.h"
 #include "drums/SampleLibrary.h"
 #include <QDir>
@@ -428,4 +429,98 @@ TEST(drums, user_presets_save_and_load_with_relative_samples)
     broken.close();
     CHECK(!D::loadKitPreset("Broken", samples, &error).has_value());
     CHECK(error.contains("Broken.drumkit"));
+}
+
+// ── Kits from sample folders ────────────────────────────────────────────────
+
+TEST(drums, sample_names_map_to_gm_notes)
+{
+    const std::vector<std::pair<const char*, int>> cases = {
+        { "Kick.wav", 36 }, { "BD_Punchy01.wav", 36 }, { "808 Kick Long.wav", 36 }, { "BassDrum.aif", 36 },
+        { "Kicks/001.wav", 36 }, { "kik_hard.wav", 36 },
+        { "Snare.wav", 38 }, { "SD Tight.wav", 38 }, { "Snares/Fat 2.wav", 38 },
+        { "Clap.wav", 39 }, { "CP_909.wav", 39 }, { "Rimshot.wav", 37 }, { "Side Stick.wav", 37 },
+        { "HH Closed.wav", 42 }, { "HiHat.wav", 42 }, { "Closed Hat 2.wav", 42 }, { "CH.wav", 42 },
+        { "OpenHat.wav", 46 }, { "OH_1.wav", 46 }, { "Hats/Open.wav", 46 }, { "Hi-Hat Open.flac", 46 },
+        { "Pedal Hat.wav", 44 }, { "HH Foot.wav", 44 },
+        { "Tom Floor.wav", 41 }, { "Floor Tom High.wav", 43 }, { "Tom Low.wav", 45 }, { "Mid Tom.wav", 47 },
+        { "Hi Tom.wav", 50 }, { "Toms/High.wav", 50 }, { "LT.wav", 45 },
+        { "Crash 18.wav", 49 }, { "Ride.wav", 51 }, { "Ride Bell.wav", 53 }, { "Splash.wav", 55 },
+        { "China.wav", 52 }, { "Cymbals/Crash.wav", 49 },
+        { "Cowbell.wav", 56 }, { "Tambourine.wav", 54 }, { "Shaker.wav", 70 }, { "Clave.wav", 75 },
+        // Folder words decide only when the file name says nothing.
+        { "Kicks/Snare Layer.wav", 38 },
+    };
+    for (const auto& [path, note] : cases) {
+        const auto guess = D::guessDrumNote(path);
+        if (!guess || *guess != note)
+            reportFailure(__FILE__, __LINE__, std::string(path) + " -> " + (guess ? std::to_string(*guess) : "none")
+                                                  + ", expected " + std::to_string(note));
+    }
+    for (const char* none : { "Custom FX.wav", "Bottom End.wav", "That Sound.wav", "Trim 3.wav", "Loop 120bpm.wav",
+                              "Pad.wav", "808 Bass.wav" })
+        if (const auto guess = D::guessDrumNote(none))
+            reportFailure(__FILE__, __LINE__, std::string(none) + " should not match, got " + std::to_string(*guess));
+}
+
+TEST(drums, a_folder_becomes_a_kit)
+{
+    QTemporaryDir root;
+    const QString samples = root.path() + "/Samples";
+    const QString pack = samples + "/Acoustic";
+    auto touch = [&](const QString& rel) {
+        QDir().mkpath(QFileInfo(pack + "/" + rel).path());
+        QFile f(pack + "/" + rel);
+        f.open(QIODevice::WriteOnly);
+    };
+    for (const char* f : { "Kick/Kick Hard.wav", "Kick/Kick Soft.wav", "Kick/Kick Hard 2.wav",
+                           "Snare Ghost.wav", "Snare.wav", "Hats/Closed Soft.wav", "Hats/Closed Tight.wav", "Hats/Open.wav",
+                           "Toms/Tom 1.wav", "Toms/Tom 2.wav", "Toms/Tom 3.wav",
+                           "Crash.wav", "Ride.wav", "Room Ambience.wav", "notes.txt" })
+        touch(f);
+
+    const auto fk = D::buildKitFromFolder(pack, samples);
+    CHECK(fk.sampleCount == 14);   // the .txt isn't a sample
+    CHECK(fk.kit.validate().isEmpty());
+    CHECK(fk.unmatched == QStringList{ "Room Ambience.wav" });
+
+    auto sampleOf = [&](int note) {
+        const auto* p = fk.kit.padForNote(note);
+        return p && p->source == D::PadSource::Sample ? p->sample : QString();
+    };
+    CHECK(sampleOf(36) == "Acoustic/Kick/Kick Hard.wav");   // not the soft layer; relative to the samples folder
+    CHECK(fk.alternatives.value(36).size() == 2);
+    CHECK(sampleOf(38) == "Acoustic/Snare.wav");
+    CHECK(sampleOf(42) == "Acoustic/Hats/Closed Tight.wav");   // the soft take is shorter, but soft
+    CHECK(sampleOf(46) == "Acoustic/Hats/Open.wav");
+    // Three numbered toms: high, mid and floor.
+    CHECK(sampleOf(50) == "Acoustic/Toms/Tom 1.wav");
+    CHECK(sampleOf(47) == "Acoustic/Toms/Tom 2.wav");
+    CHECK(sampleOf(41) == "Acoustic/Toms/Tom 3.wav");
+    CHECK(sampleOf(49) == "Acoustic/Crash.wav");
+    CHECK(sampleOf(51) == "Acoustic/Ride.wav");
+    // Pads keep the default kit's names and mix (hats still choke each other).
+    CHECK(fk.kit.padForNote(42)->name == "Closed Hat" && fk.kit.padForNote(42)->choke == 1);
+    CHECK(fk.kit.padForNote(46)->choke == 1);
+    // Unmatched notes keep their synth voice...
+    CHECK(fk.kit.padForNote(39) && fk.kit.padForNote(39)->source == D::PadSource::Synth);
+    CHECK(fk.kit.pads.size() == D::Kit::defaultKit().pads.size());
+    // ...or are left out.
+    const auto only = D::buildKitFromFolder(pack, samples, false);
+    CHECK(only.kit.pads.size() == 9);
+    CHECK(only.kit.validate().isEmpty());
+    for (const auto& p : only.kit.pads) CHECK(p.source == D::PadSource::Sample);
+
+    // Outside the samples folder, paths are absolute.
+    const auto elsewhere = D::buildKitFromFolder(pack, root.path() + "/Other");
+    CHECK(QDir::isAbsolutePath(elsewhere.chosen.value(38)));
+
+    // Many numbered takes of one tom are one tom, not six.
+    QTemporaryDir takes;
+    for (int i = 1; i <= 8; ++i) {
+        QFile f(takes.path() + QString("/Tom %1.wav").arg(i));
+        f.open(QIODevice::WriteOnly);
+    }
+    const auto tk = D::buildKitFromFolder(takes.path(), samples, false);
+    CHECK(tk.kit.pads.size() == 1 && tk.kit.pads[0].note == 47 && tk.alternatives.value(47).size() == 7);
 }

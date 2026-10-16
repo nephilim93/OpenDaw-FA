@@ -3,6 +3,7 @@
 #include "DrumsViewLink.h"
 #include "GmDrumNames.h"
 #include "SampleBrowser.h"
+#include "drums/KitFromFolder.h"
 #include "drums/KitPresets.h"
 #include "drums/SampleLibrary.h"
 #include "engine/drums/DrumMachinePlugin.h"
@@ -115,7 +116,7 @@ DrumsView::DrumsView(EditManager* editMgr, QWidget* parent)
     titleLabel_ = new QLabel(editorPage);
     titleLabel_->setStyleSheet(QString("color: %1; font-weight: bold;").arg(theme.text.name()));
     header->addWidget(titleLabel_);
-    auto* hint = new QLabel("Click a pad to play it; drag a sample onto a pad to use it", editorPage);
+    auto* hint = new QLabel("Click a pad to play it; drag a sample onto a pad, or a folder here to build a kit", editorPage);
     hint->setStyleSheet(QString("color: %1; font-size: 10px;").arg(theme.textDim.name()));
     header->addWidget(hint);
     header->addStretch();
@@ -145,6 +146,7 @@ DrumsView::DrumsView(EditManager* editMgr, QWidget* parent)
     connect(sampleBrowser_, &SampleBrowser::sampleActivated, this, [this](const QString& path) {
         loadSample(selectedNote_, path);   // no pad selected (-1): a new pad
     });
+    connect(sampleBrowser_, &SampleBrowser::folderKitRequested, this, &DrumsView::buildKitFromFolder);
     splitter->addWidget(sampleBrowser_);
     auto* gridScroll = new QScrollArea(splitter);
     gridScroll->setWidgetResizable(true);
@@ -521,9 +523,11 @@ bool DrumsView::loadSample(int note, const QString& path)
 bool DrumsView::dropFiles(int note, const QList<QUrl>& urls)
 {
     if (urls.size() != 1 || !urls.first().isLocalFile()) {
-        showError("Drop one audio file at a time (wav, aiff, aif, flac, ogg).");
+        showError("Drop one audio file at a time (wav, aiff, aif, flac, ogg), or a folder to build a kit from.");
         return false;
     }
+    if (QFileInfo(urls.first().toLocalFile()).isDir())
+        return buildKitFromFolder(urls.first().toLocalFile());
     return loadSample(note, urls.first().toLocalFile());
 }
 
@@ -580,6 +584,26 @@ bool DrumsView::loadKitPreset(const QString& name)
     return applyKit(*kit, QString("Load Kit: %1").arg(preset ? preset->name : name.trimmed()));
 }
 
+bool DrumsView::buildKitFromFolder(const QString& folder)
+{
+    if (!drumMachine()) return false;
+    const auto fk = Drums::buildKitFromFolder(folder, Drums::samplesFolder());
+    if (fk.chosen.isEmpty()) {
+        showError(QString("None of the %1 audio files in '%2' has a name that says which drum it is.")
+                      .arg(fk.sampleCount).arg(QFileInfo(folder).fileName()));
+        return false;
+    }
+    if (!applyKit(fk.kit, QString("Build Kit: %1").arg(QFileInfo(folder).fileName()))) return false;
+    if (!fk.unmatched.isEmpty()) {
+        QStringList names;
+        for (const auto& u : fk.unmatched.mid(0, 6)) names << QFileInfo(u).fileName();
+        if (fk.unmatched.size() > 6) names << QString("%1 more").arg(fk.unmatched.size() - 6);
+        showError(QString("Placed %1 samples. Not placed (drag them onto pads): %2.")
+                      .arg(fk.chosen.size()).arg(names.join(", ")));
+    }
+    return true;
+}
+
 bool DrumsView::saveKitPreset(const QString& name, bool overwrite)
 {
     auto* dm = drumMachine();
@@ -632,6 +656,10 @@ void DrumsView::showKitsMenu(const QPoint& globalPos)
         menu.addAction(name, this, [this, name]() { loadKitPreset(name); });
     }
     menu.addSeparator();
+    menu.addAction(QString::fromUtf8("Build Kit from Folder…"), this, [this]() {
+        const QString dir = QFileDialog::getExistingDirectory(this, "Build Kit from Folder", Drums::samplesFolder());
+        if (!dir.isEmpty()) buildKitFromFolder(dir);
+    });
     menu.addAction(QString::fromUtf8("Save Kit as Preset…"), this, [this]() { promptSaveKitPreset(); });
     menu.addAction("Open Kits Folder", this, []() {
         const QString dir = Drums::kitsFolder(Drums::samplesFolder());

@@ -4,10 +4,12 @@
 #include "utils/ThemeManager.h"
 #include <QDesktopServices>
 #include <QDir>
+#include <QFileInfo>
 #include <QFileSystemModel>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QLabel>
+#include <QMenu>
 #include <QPushButton>
 #include <QStackedWidget>
 #include <QTreeView>
@@ -61,6 +63,16 @@ SampleBrowser::SampleBrowser(QWidget* parent) : QWidget(parent)
     tree_->setToolTip("Drag a sample onto a pad, or double-click it to load it on the selected pad");
     connect(tree_, &QTreeView::doubleClicked, this, [this](const QModelIndex& index) {
         if (!model_->isDir(index)) emit sampleActivated(model_->filePath(index));
+    });
+    tree_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(tree_, &QTreeView::customContextMenuRequested, this, [this](const QPoint& pos) {
+        const QModelIndex index = tree_->indexAt(pos);
+        const QString path = index.isValid() ? model_->filePath(index) : folder_;
+        const QString dir = index.isValid() && !model_->isDir(index) ? QFileInfo(path).path() : path;
+        QMenu menu;
+        menu.addAction(QString("Build Kit from '%1'").arg(QFileInfo(dir).fileName()), this,
+                       [this, dir]() { emit folderKitRequested(dir); });
+        menu.exec(tree_->viewport()->mapToGlobal(pos));
     });
     stack_->addWidget(tree_);
 

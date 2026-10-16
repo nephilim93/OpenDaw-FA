@@ -504,6 +504,37 @@ int main(int argc, char** argv)
             QJsonObject{ { "track", "Groove" }, { "name", "Jazz Brushes" } } });
         EXPECT(unknown.isError && unknown.content.contains("Synth 808") && unknown.content.contains("Groove Kit"));
 
+        // Sample listing and kits built from a folder.
+        for (const char* f : { "Acoustic/Kick.wav", "Acoustic/Snare Ghost.wav", "Acoustic/Toms/Floor.wav",
+                               "Acoustic/Room.wav", "808/BD.wav" })
+            writeTestWav(juce::File(juce::String((samples.path() + "/" + f).toStdString())));
+        auto [okLs, rLs] = call("list_drum_samples", QJsonObject{ { "filter", "acoustic/" } });
+        EXPECT(okLs && rLs["total"].toInt() == 5);   // snare.wav from before, and the four above
+        bool kickGuessed = false;
+        for (const auto& v : rLs["files"].toArray())
+            kickGuessed |= v.toObject()["path"] == "Acoustic/Kick.wav" && v.toObject()["guess"].toString().contains("36");
+        EXPECT(kickGuessed);
+        EXPECT(call("list_drum_samples", {}).second["subfolders"].toArray().size() == 2);
+        EXPECT(!call("list_drum_samples", QJsonObject{ { "folder", "Nope" } }).first);
+
+        um.clearUndoHistory();
+        auto [okF, rF] = call("build_drum_kit_from_folder", QJsonObject{ { "track", "Groove" }, { "folder", "Acoustic" },
+                                                                         { "save_as", "Acoustic" } });
+        EXPECT(okF && drums && drums->kit().padForNote(36)->sample == "Acoustic/Kick.wav");
+        EXPECT(drums && drums->kit().padForNote(41)->sample == "Acoustic/Toms/Floor.wav");
+        EXPECT(drums && drums->kit().padForNote(38)->sample == "Acoustic/snare.wav");   // not the ghost
+        EXPECT(rF["unmatched"].toArray().size() == 1 && rF["unmatched"].toArray()[0] == "Acoustic/Room.wav");
+        EXPECT(rF["saved_preset"] == "Acoustic");
+        EXPECT(countUndoSteps(um) == 1);
+        bool ghostOffered = false;
+        for (const auto& v : rF["mapped"].toArray())
+            if (v.toObject()["note"].toInt() == 38)
+                ghostOffered = v.toObject()["other_candidates"].toArray().contains("Acoustic/Snare Ghost.wav");
+        EXPECT(ghostOffered);
+        const auto noFolder = tools.execute(AiToolCall{ "tf", "build_drum_kit_from_folder",
+                                                        QJsonObject{ { "track", "Groove" }, { "folder", "Nowhere" } } });
+        EXPECT(noFolder.isError && !um.canRedo() && countUndoSteps(um) == 1);
+
         // On a track without an instrument it loads the Drum Machine too, in the same step.
         auto* kitTrack = editMgr.addMidiTrack();
         kitTrack->setName("Kit Track");
@@ -512,6 +543,11 @@ int main(int argc, char** argv)
         EXPECT(okN && rN["drum_machine_created"].toBool());
         EXPECT(dynamic_cast<DrumMachinePlugin*>(editMgr.getTrackInstrument(kitTrack)) != nullptr);
         EXPECT(countUndoSteps(um) == 1);
+        um.undo();
+        EXPECT(editMgr.getTrackInstrument(kitTrack) == nullptr);
+        um.clearUndoHistory();
+        auto [okNF, rNF] = call("build_drum_kit_from_folder", QJsonObject{ { "track", "Kit Track" }, { "folder", "808" } });
+        EXPECT(okNF && rNF["drum_machine_created"].toBool() && countUndoSteps(um) == 1);
         um.undo();
         EXPECT(editMgr.getTrackInstrument(kitTrack) == nullptr);
 
