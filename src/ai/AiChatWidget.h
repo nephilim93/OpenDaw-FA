@@ -95,6 +95,7 @@ private:
     QTextBrowser* streamingLabel_ = nullptr;
     QString streamingText_;
     bool isStreaming_ = false;
+    bool followBottom_ = true;   // keep the newest message in view
     QTimer* streamThrottle_ = nullptr;
     bool streamDirty_ = false;
 

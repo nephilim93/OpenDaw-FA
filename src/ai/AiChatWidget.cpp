@@ -213,6 +213,15 @@ void AiChatWidget::setupUi()
     scrollArea_->setWidgetResizable(true);
     scrollArea_->setFrameStyle(QFrame::NoFrame);
     scrollArea_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    // Follow new content while the user is at the bottom. Bubbles grow after
+    // layout (e.g. the final markdown render), so a one-off scroll misses it.
+    auto* sb = scrollArea_->verticalScrollBar();
+    connect(sb, &QScrollBar::rangeChanged, this, [this, sb](int, int max) {
+        if (followBottom_) sb->setValue(max);
+    });
+    connect(sb, &QScrollBar::valueChanged, this, [this, sb](int value) {
+        followBottom_ = value >= sb->maximum() - 8;
+    });
     scrollArea_->setStyleSheet(
         QString("QScrollArea { background: %1; border: none; }"
                 "QScrollBar:vertical { background: %1; width: 8px; }"
@@ -512,6 +521,7 @@ void AiChatWidget::finalizeStreamingBubble()
 
 void AiChatWidget::scrollToBottom()
 {
+    followBottom_ = true;
     QTimer::singleShot(10, this, [this]() {
         auto* sb = scrollArea_->verticalScrollBar();
         sb->setValue(sb->maximum());
