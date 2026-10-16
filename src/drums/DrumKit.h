@@ -56,7 +56,8 @@ struct Kit {
 };
 
 const char* padSourceName(PadSource s);
-// Modules a synth pad may use: those with a "trigger" input and an "out" output.
+// Modules a synth pad may use: the drum voices (the Voices family's modules
+// with a "trigger" input and an "out" output).
 QStringList synthPadModules();
 
 } // namespace OpenDaw::Drums

@@ -9,11 +9,18 @@ namespace OpenDaw::Drums {
 
 namespace {
 
+// Drum voices: the Voices family's modules that fire on a trigger. Other
+// modules with a trigger input (sample_hold, random) make CV, not sound.
+bool isDrumVoice(const Modular::ModuleDef& def)
+{
+    return def.category == Modular::Category::Voices && def.inputIndex("trigger") >= 0
+        && def.outputIndex("out") >= 0;
+}
+
 const Modular::ModuleDef* synthModule(const QString& type)
 {
     const auto* def = Modular::findModule(type.toStdString());
-    if (!def || def->inputIndex("trigger") < 0 || def->outputIndex("out") < 0) return nullptr;
-    return def;
+    return def && isDrumVoice(*def) ? def : nullptr;
 }
 
 std::optional<PadSource> parseSource(const QString& s)
@@ -48,7 +55,7 @@ QStringList synthPadModules()
 {
     QStringList types;
     for (const auto& def : Modular::allModules())
-        if (def.inputIndex("trigger") >= 0 && def.outputIndex("out") >= 0)
+        if (isDrumVoice(def))
             types << QString::fromStdString(def.type);
     return types;
 }
