@@ -290,7 +290,7 @@ void ModularEditorView::rebuild()
 
     std::map<QString, ModulePanelItem*> byId;
     for (const auto& m : patch_.modules) {
-        const auto* def = Modular::findModule(m.type.toStdString());
+        const auto* def = Modular::moduleDef(m);
         if (!def) continue;
         auto* panel = new ModulePanelItem(m, *def, patch_);
         panel->setPos(m.x, m.y);
