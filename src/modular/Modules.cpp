@@ -353,7 +353,8 @@ void assignCategories(std::vector<ModuleDef>& defs)
         { "delay", C::Effects }, { "reverb", C::Effects },
 
         { "kick", C::Voices }, { "snare", C::Voices }, { "hihat", C::Voices },
-        { "fm_voice", C::Voices },
+        { "fm_voice", C::Voices }, { "clap", C::Voices }, { "tom", C::Voices },
+        { "cymbal", C::Voices }, { "rimshot", C::Voices }, { "cowbell", C::Voices },
 
         { "voice_in", C::Core }, { "voice_out", C::Core }, { "voices", C::Core },
         { "output", C::Core },
