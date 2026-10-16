@@ -79,6 +79,22 @@ TEST(drums, default_kit_is_valid_and_round_trips)
     CHECK(group != 0 && kit.padForNote(D::Gm::ClosedHat)->choke == group
           && kit.padForNote(D::Gm::PedalHat)->choke == group);
     CHECK(kit.padForNote(D::Gm::Kick)->choke == 0);
+    // Each GM sound uses its own voice, not a stand-in.
+    CHECK(kit.padForNote(D::Gm::Clap)->module == "clap");
+    CHECK(kit.padForNote(D::Gm::SideStick)->module == "rimshot");
+    CHECK(kit.padForNote(D::Gm::Cowbell)->module == "cowbell");
+    CHECK(kit.padForNote(D::Gm::Crash)->module == "cymbal" && kit.padForNote(D::Gm::Ride)->module == "cymbal");
+    for (int note : { D::Gm::LowFloorTom, D::Gm::HighFloorTom, D::Gm::LowTom, D::Gm::LowMidTom,
+                      D::Gm::HighMidTom, D::Gm::HighTom })
+        CHECK_MSG(kit.padForNote(note)->module == "tom", "tom pad " + str(note));
+    // Toms rise in pitch with the note number.
+    float lastTune = 0.0f;
+    for (int note : { D::Gm::LowFloorTom, D::Gm::HighFloorTom, D::Gm::LowTom, D::Gm::LowMidTom,
+                      D::Gm::HighMidTom, D::Gm::HighTom }) {
+        const float tune = kit.padForNote(note)->params.value("tune");
+        CHECK_MSG(tune > lastTune, "tom " + str(note) + " at " + str(tune));
+        lastTune = tune;
+    }
 
     QString err;
     const auto back = D::Kit::fromJson(kit.toJson(), &err);
@@ -270,6 +286,6 @@ TEST(drums, whole_kit_is_finite_and_quiet_pads_idle)
     CHECK(allFinite(out.left) && allFinite(out.right));
     CHECK(maxAbs(out.left, 0, 100) == 0.0);
     CHECK(maxAbs(out.left, 100, 4000) > 0.3);
-    // Longest pad decay is 2 s at -60 dB; by 5 s everything is far below that.
+    // Longest pad decay is 2.5 s at -60 dB; by 5 s everything is far below that.
     CHECK(maxAbs(out.left, int(kRate * 5), len) < 1e-4);
 }

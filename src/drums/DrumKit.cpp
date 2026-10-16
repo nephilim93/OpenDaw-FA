@@ -177,40 +177,35 @@ Pad* Kit::padForNote(int note)
 Kit Kit::defaultKit()
 {
     // Hats share choke group 1, so a closed or pedal hat cuts off an open one.
-    // Toms and cymbals use the kick and hat voices until dedicated ones exist.
+    // Toms are spread from floor (left) to high (right), as seen from the drummer's seat.
+    auto tom = [](int note, const char* name, float hz, float pan) {
+        return synthPad(note, name, "tom", { { "tune", hz }, { "decay", 0.25f + 30.0f / hz } }, 0.75f, pan);
+    };
     Kit kit;
     kit.pads = {
         synthPad(Gm::Kick, "Kick", "kick", {}, 0.9f),
-        synthPad(Gm::SideStick, "Side Stick", "snare",
-                 { { "tune", 380.0f }, { "tone_decay", 0.05f }, { "noise_decay", 0.03f }, { "snappy", 0.15f } }, 0.6f),
+        synthPad(Gm::SideStick, "Side Stick", "rimshot", {}, 0.6f),
         synthPad(Gm::Snare, "Snare", "snare", {}, 0.8f),
-        synthPad(Gm::Clap, "Clap", "snare",
-                 { { "snappy", 1.0f }, { "noise_decay", 0.25f }, { "color", 1200.0f } }, 0.7f),
+        synthPad(Gm::Clap, "Clap", "clap", {}, 0.7f),
         synthPad(Gm::ElectricSnare, "Electric Snare", "snare",
                  { { "tune", 220.0f }, { "snappy", 0.8f }, { "color", 3000.0f } }, 0.75f),
-        synthPad(Gm::LowFloorTom, "Low Floor Tom", "kick",
-                 { { "tune", 70.0f }, { "sweep", 1.0f }, { "decay", 0.5f }, { "click", 0.1f } }, 0.75f, -0.4f),
+        tom(Gm::LowFloorTom, "Low Floor Tom", 75.0f, -0.4f),
         synthPad(Gm::ClosedHat, "Closed Hat", "hihat", { { "decay", 0.05f } }, 0.55f, 0.2f, 1),
-        synthPad(Gm::HighFloorTom, "High Floor Tom", "kick",
-                 { { "tune", 82.0f }, { "sweep", 1.0f }, { "decay", 0.45f }, { "click", 0.1f } }, 0.75f, -0.3f),
+        tom(Gm::HighFloorTom, "High Floor Tom", 90.0f, -0.3f),
         synthPad(Gm::PedalHat, "Pedal Hat", "hihat", { { "decay", 0.03f }, { "color", 6000.0f } }, 0.45f, 0.2f, 1),
-        synthPad(Gm::LowTom, "Low Tom", "kick",
-                 { { "tune", 95.0f }, { "sweep", 1.0f }, { "decay", 0.4f }, { "click", 0.1f } }, 0.75f, -0.15f),
+        tom(Gm::LowTom, "Low Tom", 110.0f, -0.15f),
         synthPad(Gm::OpenHat, "Open Hat", "hihat", { { "decay", 0.6f } }, 0.5f, 0.2f, 1),
-        synthPad(Gm::LowMidTom, "Low-Mid Tom", "kick",
-                 { { "tune", 110.0f }, { "sweep", 1.0f }, { "decay", 0.35f }, { "click", 0.1f } }, 0.75f, 0.0f),
-        synthPad(Gm::HighMidTom, "High-Mid Tom", "kick",
-                 { { "tune", 128.0f }, { "sweep", 1.0f }, { "decay", 0.32f }, { "click", 0.1f } }, 0.75f, 0.15f),
-        synthPad(Gm::Crash, "Crash", "hihat",
-                 { { "decay", 1.8f }, { "color", 4000.0f }, { "metal", 0.3f } }, 0.45f, -0.3f),
-        synthPad(Gm::HighTom, "High Tom", "kick",
-                 { { "tune", 148.0f }, { "sweep", 1.0f }, { "decay", 0.3f }, { "click", 0.1f } }, 0.75f, 0.3f),
-        synthPad(Gm::Ride, "Ride", "hihat",
-                 { { "decay", 1.2f }, { "color", 6000.0f }, { "metal", 0.8f } }, 0.4f, 0.35f),
-        synthPad(Gm::RideBell, "Ride Bell", "hihat",
-                 { { "decay", 0.9f }, { "color", 3500.0f }, { "metal", 1.0f } }, 0.4f, 0.35f),
-        synthPad(Gm::Crash2, "Crash 2", "hihat",
-                 { { "decay", 2.0f }, { "color", 3500.0f }, { "metal", 0.25f } }, 0.45f, 0.4f),
+        tom(Gm::LowMidTom, "Low-Mid Tom", 135.0f, 0.0f),
+        tom(Gm::HighMidTom, "High-Mid Tom", 165.0f, 0.15f),
+        synthPad(Gm::Crash, "Crash", "cymbal", { { "decay", 2.0f } }, 0.5f, -0.3f),
+        tom(Gm::HighTom, "High Tom", 200.0f, 0.3f),
+        synthPad(Gm::Ride, "Ride", "cymbal", { { "kind", 1.0f }, { "decay", 2.5f } }, 0.45f, 0.35f),
+        synthPad(Gm::RideBell, "Ride Bell", "cymbal",
+                 { { "kind", 1.0f }, { "decay", 2.0f }, { "bell", 1.0f } }, 0.45f, 0.35f),
+        synthPad(Gm::Tambourine, "Tambourine", "hihat",
+                 { { "decay", 0.15f }, { "color", 7000.0f }, { "metal", 0.9f } }, 0.4f, -0.2f),
+        synthPad(Gm::Cowbell, "Cowbell", "cowbell", {}, 0.5f, 0.1f),
+        synthPad(Gm::Crash2, "Crash 2", "cymbal", { { "decay", 2.4f }, { "color", 3500.0f } }, 0.5f, 0.4f),
     };
     return kit;
 }
