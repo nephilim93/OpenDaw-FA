@@ -559,7 +559,11 @@ void AiChatWidget::onToolCallFinished(const QString& toolName, const QString& /*
                                       const QString& result, bool isError)
 {
     appendToolBubble(toolName, result, isError);
-    statusLabel_->clear();
+    // The results go back to the model, which is still working on its reply.
+    if (aiService_->isBusy())
+        statusLabel_->setText("Thinking...");
+    else
+        statusLabel_->clear();
 }
 
 void AiChatWidget::onError(const QString& error)
