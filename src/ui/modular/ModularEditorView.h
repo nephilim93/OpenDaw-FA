@@ -48,7 +48,7 @@ public:
     bool addModule(const QString& type, QPointF scenePos);
     // Faust code modules: what the code dialog's Save does, one undo step each.
     // editModuleCode refuses code that would drop cables unless allowed.
-    bool addCodeModule(const QString& code, QPointF scenePos);
+    bool addCodeModule(const QString& code, QPointF scenePos, const QString& idBase = "code");
     bool editModuleCode(const QString& id, const QString& code, bool allowDroppedCables = false);
     // Cables that new code for `id` would drop (ports it no longer has);
     // empty if none or the code doesn't compile.

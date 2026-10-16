@@ -9,6 +9,7 @@
 #include "engine/EditManager.h"
 #include "engine/modular/ModularSynthPlugin.h"
 #include "ui/controls/RotaryKnob.h"
+#include "modular/FaustStarters.h"
 #include "ui/modular/FaustCodeDialog.h"
 #include "ui/modular/ModularEditorView.h"
 #include "ui/modular/ModulePanelItem.h"
@@ -238,6 +239,12 @@ int main(int argc, char** argv)
         EXPECT(code && code->knob("gain") && code->knob("drive") && code->codeError().isEmpty());
         EXPECT(countUndoSteps(um) == 1);
         EXPECT(um.getUndoDescription() == "Add Code Module");
+
+        // A starter from the menu is named after itself.
+        const auto& crusher = M::codeStarters().front();
+        EXPECT(view.addCodeModule(crusher.code, voiceZone + QPointF(240, 0), crusher.name));
+        settle();
+        EXPECT(view.panel(QString(crusher.name) + "1") != nullptr);
 
         EXPECT(view.connectPorts({ "vco1", "out" }, { "code1", "in" }));
         settle();

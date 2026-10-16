@@ -1,5 +1,6 @@
 #include "ModularEditorView.h"
 #include "FaustCodeDialog.h"
+#include "modular/FaustStarters.h"
 #include <QNativeGestureEvent>
 #include "engine/modular/ModularSynthPlugin.h"
 #include "utils/ThemeManager.h"
@@ -483,10 +484,10 @@ bool ModularEditorView::addModule(const QString& type, QPointF scenePos)
                      "Add Module");
 }
 
-bool ModularEditorView::addCodeModule(const QString& code, QPointF scenePos)
+bool ModularEditorView::addCodeModule(const QString& code, QPointF scenePos, const QString& idBase)
 {
     return applyEdit({ QJsonObject{
-                         { "op", "write_module" }, { "id", uniqueModuleId("code") }, { "code", code },
+                         { "op", "write_module" }, { "id", uniqueModuleId(idBase) }, { "code", code },
                          { "section", Modular::sectionName(sectionAt(scenePos)) },
                          { "x", std::round(scenePos.x()) }, { "y", std::round(scenePos.y()) } } },
                      "Add Code Module");
@@ -871,8 +872,17 @@ void ModularEditorView::showBackgroundMenu(const QPointF& scenePos, const QPoint
         }
         if (category == Modular::Category::Code && Modular::codeModulesAvailable()) {
             auto* code = add->addMenu(Modular::categoryLabel(category));
+            code->setToolTipsVisible(true);
             code->addAction("New Faust Module…", this,
                             [this, scenePos]() { openCodeDialog({}, scenePos); });
+            code->addSeparator();
+            for (const auto& starter : Modular::codeStarters()) {
+                const QString name = starter.name, source = starter.code;
+                auto* action = code->addAction(name, this, [this, name, source, scenePos]() {
+                    addCodeModule(source, scenePos, name);
+                });
+                action->setToolTip(QString(starter.description) + "\nRight-click it, then Edit Code… to change it.");
+            }
         }
     }
     menu.exec(screenPos);

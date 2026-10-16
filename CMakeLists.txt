@@ -114,7 +114,7 @@ set(OpenDaw_SOURCES
     src/modular/Module.h src/modular/ModuleRegistry.h src/modular/Modules.cpp
     src/modular/ModuleHelpers.h src/modular/ModuleLibrary.h
     src/modular/ModulesSequencing.cpp src/modular/ModulesRandom.cpp src/modular/ModulesFx.cpp
-    src/modular/ModulesExtra.cpp
+    src/modular/ModulesExtra.cpp src/modular/FaustStarters.h src/modular/FaustStarters.cpp
     src/modular/Patch.h src/modular/Patch.cpp
     src/modular/CompiledPatch.h src/modular/CompiledPatch.cpp
     src/modular/FaustModule.cpp

@@ -1,4 +1,5 @@
 #include "TestHarness.h"
+#include "modular/FaustStarters.h"
 #include <algorithm>
 #include <limits>
 
@@ -360,4 +361,41 @@ TEST(faust, write_module_adds_and_updates)
     // Ids of library modules can't be overwritten.
     err = applyOps(p, { writeOp("osc", kGain) });
     CHECK_MSG(err.contains("'osc' is a vco module"), err);
+}
+
+TEST(faust, starters_compile_and_process)
+{
+    if (!M::codeModulesAvailable()) return;
+    const auto& starters = M::codeStarters();
+    CHECK(starters.size() >= 6);
+    for (const auto& starter : starters) {
+        const std::string name = starter.name;
+        const auto result = M::compileCodeModule(name, starter.code);
+        CHECK_MSG(result.def != nullptr, name + ": " + result.error);
+        if (!result.def) continue;
+        // Offered as mono effects: one audio input, one output, some knobs.
+        CHECK_MSG(result.def->inputs.size() == 1 && result.def->outputs.size() == 1, name);
+        CHECK_MSG(!result.def->params.empty(), name);
+
+        // Left: a full-scale sine through the starter at its defaults; right: the dry sine.
+        auto cp = compile(patchJson(
+            { mod("osc", "vco", { { "wave", "sine" }, { "tune", -12 }, { "level", 1 } }, "global"),
+              codeMod("fx", starter.code), output() },
+            { cable("osc.out", "fx.in"), cable("fx.out", "out.left"), cable("osc.out", "out.right") }));
+        if (!cp) continue;
+        const auto out = renderPatch(*cp, 24000);
+        double peak = 0.0, change = 0.0;
+        bool finite = true;
+        for (size_t i = 0; i < out.left.size(); ++i) {
+            finite = finite && std::isfinite(out.left[i]);
+            peak = std::max(peak, double(std::abs(out.left[i])));
+            change = std::max(change, std::abs(double(out.left[i]) - out.right[i]));
+        }
+        CHECK_MSG(finite, name);
+        // Not silent, not blowing up (no starter more than doubles a full-scale
+        // input), and audibly different from the dry signal.
+        CHECK_MSG(rms(out.left, 12000, 24000) > 0.05, name + " rms " + str(rms(out.left, 12000, 24000)));
+        CHECK_MSG(peak <= 2.0, name + " peak " + str(peak));
+        CHECK_MSG(change > 0.01, name + " max change " + str(change));
+    }
 }
