@@ -3,9 +3,12 @@
 #include "DrumsViewLink.h"
 #include "GmDrumNames.h"
 #include "SampleBrowser.h"
+#include "drums/KitPresets.h"
 #include "drums/SampleLibrary.h"
 #include "engine/drums/DrumMachinePlugin.h"
 #include "utils/ThemeManager.h"
+#include <QDesktopServices>
+#include <QDir>
 #include <QDragEnterEvent>
 #include <QDropEvent>
 #include <QFileDialog>
@@ -15,6 +18,7 @@
 #include <QInputDialog>
 #include <QLabel>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMimeData>
 #include <QPushButton>
 #include <QRegularExpression>
@@ -115,6 +119,13 @@ DrumsView::DrumsView(EditManager* editMgr, QWidget* parent)
     hint->setStyleSheet(QString("color: %1; font-size: 10px;").arg(theme.textDim.name()));
     header->addWidget(hint);
     header->addStretch();
+    auto* kitsButton = new QPushButton("Kits", editorPage);
+    kitsButton->setAccessibleName("Kit Presets");
+    kitsButton->setToolTip("Load a kit preset, or save this kit as one");
+    connect(kitsButton, &QPushButton::clicked, this, [this, kitsButton]() {
+        showKitsMenu(kitsButton->mapToGlobal(QPoint(0, kitsButton->height())));
+    });
+    header->addWidget(kitsButton);
     auto* addButton = new QPushButton("Add Pad", editorPage);
     addButton->setAccessibleName("Add Pad");
     addButton->setToolTip("Add a synth pad on the next free General MIDI drum note");
@@ -553,6 +564,80 @@ void DrumsView::showPadMenu(int note, const QPoint& globalPos)
     reset->setEnabled(Drums::Kit::defaultKit().padForNote(note) != nullptr);
     menu.addSeparator();
     menu.addAction("Remove", this, [this, note]() { removePad(note); });
+    menu.exec(globalPos);
+}
+
+bool DrumsView::loadKitPreset(const QString& name)
+{
+    if (!drumMachine()) return false;
+    QString error;
+    const auto kit = Drums::loadKitPreset(name, Drums::samplesFolder(), &error);
+    if (!kit) {
+        showError(error);
+        return false;
+    }
+    const auto preset = Drums::findKitPreset(name, Drums::samplesFolder());
+    return applyKit(*kit, QString("Load Kit: %1").arg(preset ? preset->name : name.trimmed()));
+}
+
+bool DrumsView::saveKitPreset(const QString& name, bool overwrite)
+{
+    auto* dm = drumMachine();
+    if (!dm) return false;
+    QString error;
+    QStringList outside;
+    if (!Drums::saveKitPreset(dm->kit(), name, Drums::samplesFolder(), overwrite, &error, &outside)) {
+        showError(error);
+        return false;
+    }
+    if (!outside.isEmpty())
+        showError(QString("Saved. These samples are outside the samples folder, so the preset only "
+                          "finds them on this computer: %1.").arg(outside.join(", ")));
+    return true;
+}
+
+void DrumsView::promptSaveKitPreset()
+{
+    bool ok = false;
+    const QString name = QInputDialog::getText(this, "Save Kit Preset", "Preset name:", QLineEdit::Normal,
+                                               QString(), &ok).trimmed();
+    if (!ok) return;
+    if (const QString e = Drums::kitPresetNameError(name); !e.isEmpty()) {
+        showError(e);
+        return;
+    }
+    const auto existing = Drums::findKitPreset(name, Drums::samplesFolder());
+    bool overwrite = false;
+    if (existing && !existing->builtIn) {
+        if (QMessageBox::question(this, "Save Kit Preset",
+                                  QString("Replace the kit preset '%1'?").arg(existing->name))
+            != QMessageBox::Yes)
+            return;
+        overwrite = true;
+    }
+    saveKitPreset(name, overwrite);
+}
+
+void DrumsView::showKitsMenu(const QPoint& globalPos)
+{
+    QMenu menu;
+    menu.setAccessibleName("Kits Menu");
+    bool sawUser = false;
+    for (const auto& preset : Drums::listKitPresets(Drums::samplesFolder())) {
+        if (!preset.builtIn && !sawUser) {
+            menu.addSeparator();
+            sawUser = true;
+        }
+        const QString name = preset.name;
+        menu.addAction(name, this, [this, name]() { loadKitPreset(name); });
+    }
+    menu.addSeparator();
+    menu.addAction(QString::fromUtf8("Save Kit as Preset…"), this, [this]() { promptSaveKitPreset(); });
+    menu.addAction("Open Kits Folder", this, []() {
+        const QString dir = Drums::kitsFolder(Drums::samplesFolder());
+        QDir().mkpath(dir);
+        QDesktopServices::openUrl(QUrl::fromLocalFile(dir));
+    });
     menu.exec(globalPos);
 }
 

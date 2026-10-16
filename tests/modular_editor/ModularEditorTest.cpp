@@ -483,6 +483,38 @@ int main(int argc, char** argv)
             QJsonObject{ { "track", "Groove" }, { "note", 41 }, { "source", "sample" }, { "sample", "Acoustic/nope.wav" } } });
         EXPECT(missing.isError && missing.content.contains(samples.path()));
 
+        // Kit presets: save this kit, load a built-in, load it back; each load is one step.
+        auto [okL, rL] = call("list_drum_kits", {});
+        EXPECT(okL && rL["presets"].toArray().size() == 3 && rL["presets"].toArray()[1].toObject()["name"] == "Synth 808");
+        auto [okS, rS] = call("save_drum_kit", QJsonObject{ { "track", "Groove" }, { "name", "Groove Kit" } });
+        EXPECT(okS && rS["saved"] == "Groove Kit" && !rS.contains("outside_samples_folder"));
+        EXPECT(!call("save_drum_kit", QJsonObject{ { "track", "Groove" }, { "name", "groove kit" } }).first);
+        EXPECT(call("list_drum_kits", {}).second["presets"].toArray().size() == 4);
+        const auto savedKit = drums ? drums->kit().toJson() : QJsonObject();
+        um.clearUndoHistory();
+        auto [okB, rB] = call("load_drum_kit", QJsonObject{ { "track", "Groove" }, { "name", "synth 909" } });
+        EXPECT(okB && rB["loaded"] == "Synth 909" && !rB.contains("drum_machine_created"));
+        EXPECT(drums && drums->kit().padForNote(38)->source == Drums::PadSource::Synth);
+        EXPECT(countUndoSteps(um) == 1);
+        auto [okG, rG] = call("load_drum_kit", QJsonObject{ { "track", "Groove" }, { "name", "Groove Kit" } });
+        EXPECT(okG && drums && drums->kit().toJson() == savedKit && drums->warnings().isEmpty());
+        um.undo();
+        EXPECT(drums && drums->kit().padForNote(38)->source == Drums::PadSource::Synth);   // back to the 909
+        const auto unknown = tools.execute(AiToolCall{ "tk", "load_drum_kit",
+            QJsonObject{ { "track", "Groove" }, { "name", "Jazz Brushes" } } });
+        EXPECT(unknown.isError && unknown.content.contains("Synth 808") && unknown.content.contains("Groove Kit"));
+
+        // On a track without an instrument it loads the Drum Machine too, in the same step.
+        auto* kitTrack = editMgr.addMidiTrack();
+        kitTrack->setName("Kit Track");
+        um.clearUndoHistory();
+        auto [okN, rN] = call("load_drum_kit", QJsonObject{ { "track", "Kit Track" }, { "name", "Synth 808" } });
+        EXPECT(okN && rN["drum_machine_created"].toBool());
+        EXPECT(dynamic_cast<DrumMachinePlugin*>(editMgr.getTrackInstrument(kitTrack)) != nullptr);
+        EXPECT(countUndoSteps(um) == 1);
+        um.undo();
+        EXPECT(editMgr.getTrackInstrument(kitTrack) == nullptr);
+
         // A track with another instrument keeps it, and the result says so.
         auto* synthTrack = editMgr.addMidiTrack();
         synthTrack->setName("Keys");

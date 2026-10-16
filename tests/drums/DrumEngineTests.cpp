@@ -1,10 +1,12 @@
 #include "../modular/TestHarness.h"
 #include "drums/DrumEngine.h"
 #include "drums/DrumKit.h"
+#include "drums/KitPresets.h"
 #include "drums/SampleLibrary.h"
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QSet>
 #include <QTemporaryDir>
 #include <QJsonArray>
 #include <algorithm>
@@ -344,4 +346,86 @@ TEST(drums, kit_paths_resolve_against_the_folder)
     QFile(snare).open(QIODevice::WriteOnly);
     CHECK(QFileInfo(D::resolveSamplePath(D::toKitPath(snare, folder), folder)).canonicalFilePath()
           == QFileInfo(snare).canonicalFilePath());
+}
+
+// ── Kit presets ─────────────────────────────────────────────────────────────
+
+TEST(drums, built_in_presets_are_valid_and_distinct)
+{
+    QTemporaryDir root;
+    const auto presets = D::listKitPresets(root.path());
+    CHECK(presets.size() == 3);
+    QSet<QString> kicks;
+    for (const auto& p : presets) {
+        CHECK(p.builtIn);
+        QString error;
+        const auto kit = D::loadKitPreset(p.name, root.path(), &error);
+        CHECK(kit.has_value());
+        if (!kit) continue;
+        CHECK(kit->validate().isEmpty());
+        CHECK(kit->padForNote(D::Gm::Kick) != nullptr);
+        const auto params = kit->padForNote(D::Gm::Kick)->params;
+        kicks.insert(QString::number(params.value("tune")) + "/" + QString::number(params.value("decay")));
+    }
+    CHECK(kicks.size() == 3);   // each preset has its own kick
+    QString error;
+    CHECK(D::loadKitPreset("synth 808", root.path(), &error).has_value());   // case doesn't matter
+    CHECK(!D::loadKitPreset("Nope", root.path(), &error).has_value());
+    CHECK(error.contains("Synth 909"));   // the message lists the presets
+}
+
+TEST(drums, user_presets_save_and_load_with_relative_samples)
+{
+    QTemporaryDir root;
+    const QString samples = root.path() + "/Samples";
+    QDir().mkpath(samples + "/Acoustic");
+    QFile(samples + "/Acoustic/kick.wav").open(QIODevice::WriteOnly);
+
+    auto kit = D::Kit::defaultKit();
+    auto* kick = kit.padForNote(D::Gm::Kick);
+    kick->source = D::PadSource::Sample;
+    kick->module.clear();
+    kick->params.clear();
+    kick->sample = samples + "/Acoustic/kick.wav";   // absolute, inside the folder
+    auto* clap = kit.padForNote(D::Gm::Clap);
+    clap->source = D::PadSource::Sample;
+    clap->module.clear();
+    clap->params.clear();
+    clap->sample = root.path() + "/elsewhere/clap.wav";   // outside it
+
+    QString error;
+    QStringList outside;
+    CHECK(D::saveKitPreset(kit, "  My Kit ", samples, false, &error, &outside));
+    CHECK(QFileInfo::exists(samples + "/Kits/My Kit.drumkit"));
+    CHECK(outside.size() == 1 && outside[0].contains("clap.wav"));
+
+    const auto presets = D::listKitPresets(samples);
+    CHECK(presets.size() == 4 && presets.last().name == "My Kit" && !presets.last().builtIn);
+    const auto loaded = D::loadKitPreset("my kit", samples, &error);
+    CHECK(loaded.has_value());
+    if (loaded) {
+        CHECK(loaded->padForNote(D::Gm::Kick)->sample == "Acoustic/kick.wav");
+        CHECK(QDir::isAbsolutePath(loaded->padForNote(D::Gm::Clap)->sample));
+        CHECK(loaded->pads.size() == kit.pads.size());
+        CHECK(loaded->padForNote(D::Gm::Snare)->module == "snare");
+    }
+
+    // Existing names need overwrite; built-in names and bad names are refused.
+    CHECK(!D::saveKitPreset(kit, "my kit", samples, false, &error));
+    CHECK(error.contains("already exists"));
+    CHECK(D::saveKitPreset(D::Kit::defaultKit(), "My Kit", samples, true, &error));
+    CHECK(D::loadKitPreset("My Kit", samples, &error)->padForNote(D::Gm::Kick)->source == D::PadSource::Synth);
+    CHECK(!D::saveKitPreset(kit, "Synth 808", samples, true, &error));
+    CHECK(error.contains("built-in"));
+    for (const char* bad : { "", "   ", "a/b", "..\\up", ".hidden", "x:y" })
+        CHECK(!D::saveKitPreset(kit, bad, samples, true, &error));
+    CHECK(D::listKitPresets(samples).size() == 4);
+
+    // A broken file is reported, not loaded.
+    QFile broken(samples + "/Kits/Broken.drumkit");
+    broken.open(QIODevice::WriteOnly);
+    broken.write("{ not json");
+    broken.close();
+    CHECK(!D::loadKitPreset("Broken", samples, &error).has_value());
+    CHECK(error.contains("Broken.drumkit"));
 }

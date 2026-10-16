@@ -23,6 +23,7 @@
 #include <QMimeData>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QTreeView>
 #include <cmath>
@@ -494,6 +495,32 @@ int main(int argc, char** argv)
         EXPECT(countUndoSteps(um) == 1);
         // Samples outside the folder keep their absolute path.
         EXPECT(dm->kit().padForNote(D::Gm::Clap)->sample == wavPath);
+    }
+
+    // ── Kit presets: save, load a built-in, load it back ──
+    std::printf("kit presets\n");
+    {
+        D::setSamplesFolder(QDir(tmp.path()).filePath("Moved Samples"));
+        const auto mine = dm->kit().toJson();
+        EXPECT(view.saveKitPreset("My Kit", false));
+        EXPECT(QFileInfo::exists(QDir(tmp.path()).filePath("Moved Samples/Kits/My Kit.drumkit")));
+        EXPECT(!view.saveKitPreset("my kit", false));   // already there
+        EXPECT(view.lastError().contains("already exists"));
+        EXPECT(!view.saveKitPreset("Synth 808", true));   // a built-in's name
+
+        um.clearUndoHistory();
+        EXPECT(view.loadKitPreset("Synth 808"));
+        settle();
+        EXPECT(countUndoSteps(um) == 1);
+        EXPECT(um.getUndoDescription() == "Load Kit: Synth 808");
+        EXPECT(dm->kit().padForNote(D::Gm::Snare)->source == D::PadSource::Synth);
+        EXPECT(view.padWidget(D::Gm::Snare) && view.padWidget(D::Gm::Snare)->sourceText() == "snare");
+        EXPECT(view.loadKitPreset("My Kit"));
+        settle();
+        EXPECT(dm->kit().toJson() == mine);
+        EXPECT(dm->warnings().isEmpty());
+        EXPECT(!view.loadKitPreset("Nope"));
+        EXPECT(view.lastError().contains("Synth 909"));
     }
 
     // ── A track without a Drum Machine shows the Load button ──

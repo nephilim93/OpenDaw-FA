@@ -325,6 +325,8 @@ const char* const AiService::kSystemPromptRules =
               "its tempo range.\n"
               "- Sound changes go through set_drum_pad (tune toms, shorten the hats, swap a voice, "
               "or load a sample file); get_drum_kit shows the kit and each voice's parameters.\n"
+              "- For a whole new sound (\"an 808 kit\", \"my acoustic kit\"), load a preset with "
+              "load_drum_kit (list_drum_kits lists them); save_drum_kit saves the current kit as one.\n"
               "\nModular Synth (OpenDaw's patchable instrument):\n"
               "- Use it when the user asks you to design a sound, build a synth patch, or make a "
               "generative/sequenced part. create_modular_synth loads it (optionally with a full "

@@ -50,6 +50,10 @@ public:
     bool loadSample(int note, const QString& path);
     // What a drop does: exactly one audio file, else a short message.
     bool dropFiles(int note, const QList<QUrl>& urls);
+    // Kit presets (Drums::listKitPresets): loading replaces the whole kit
+    // as one undo step.
+    bool loadKitPreset(const QString& name);
+    bool saveKitPreset(const QString& name, bool overwrite);
 
     // Selects the pad (its editor shows) and plays it.
     void selectPad(int note, bool audition = true);
@@ -81,6 +85,8 @@ private:
     void updateSelection();
     void showError(const QString& text);
     void showPadMenu(int note, const QPoint& globalPos);
+    void showKitsMenu(const QPoint& globalPos);
+    void promptSaveKitPreset();
     void browseSample(int note);
     int nextFreeNote() const;
 

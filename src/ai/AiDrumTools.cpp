@@ -1,6 +1,7 @@
 #include "AiToolDefs.h"
 #include "AiToolExecutor.h"
 #include "drums/DrumKit.h"
+#include "drums/KitPresets.h"
 #include "drums/SampleLibrary.h"
 #include "engine/EditManager.h"
 #include "engine/drums/DrumMachinePlugin.h"
@@ -149,6 +150,31 @@ QJsonArray AiToolDefs::drumTools()
         },
         QJsonArray{ "track", "note" }));
 
+    tools.append(tool("list_drum_kits",
+        "List the Drum Machine's kit presets: built-in synth kits (Synth Kit, Synth 808, Synth 909) "
+        "and the user's own, saved in the Kits folder of their samples folder.",
+        QJsonObject{}, QJsonArray{}));
+
+    tools.append(tool("load_drum_kit",
+        "Replace a Drum Machine's whole kit with a preset (see list_drum_kits), as one undoable "
+        "step. Loads a Drum Machine on a track without an instrument.",
+        QJsonObject{
+            { "track", trackRef() },
+            { "name", propOf("string", "The preset's name (case doesn't matter).") },
+        },
+        QJsonArray{ "track", "name" }));
+
+    tools.append(tool("save_drum_kit",
+        "Save a Drum Machine's current kit as a user preset in the Kits folder, so it can be loaded "
+        "on other tracks and in other projects. Samples inside the samples folder are stored "
+        "relative to it, so the preset travels with the folder.",
+        QJsonObject{
+            { "track", trackRef() },
+            { "name", propOf("string", "Preset name (no / \\ : * ? \" < > |).") },
+            { "overwrite", propOf("boolean", "Replace a user preset of that name (default false).") },
+        },
+        QJsonArray{ "track", "name" }));
+
     tools.append(tool("write_drum_pattern",
         "Write an idiomatic drum groove from the style library into a MIDI clip (GM drum notes "
         "on channel 10), as one undoable step: kick, snare, hats/ride, ghost notes, fills every "
@@ -198,6 +224,60 @@ void AiToolExecutor::registerDrumHandlers()
                                        { "default_swing", s.defaultSwing },
                                        { "tempo", QString("%1-%2 BPM").arg(s.tempoMin).arg(s.tempoMax) } });
         return ok(id, QJsonObject{ { "styles", styles } });
+    };
+
+    handlers_["list_drum_kits"] = [this](const QJsonObject&, const QString& id) {
+        const QString folder = Drums::samplesFolder();
+        QJsonArray presets;
+        for (const auto& p : Drums::listKitPresets(folder))
+            presets.append(QJsonObject{ { "name", p.name }, { "built_in", p.builtIn } });
+        return ok(id, QJsonObject{ { "presets", presets }, { "kits_folder", Drums::kitsFolder(folder) } });
+    };
+
+    handlers_["load_drum_kit"] = [this, findDrums, noDrums](const QJsonObject& input, const QString& id) -> AiToolResult {
+        auto* track = resolveTrack(input["track"]);
+        if (!track) return err(id, "Track not found.");
+        const QString folder = Drums::samplesFolder();
+        QString error;
+        const auto kit = Drums::loadKitPreset(input["name"].toString(), folder, &error);
+        if (!kit) return err(id, error + " Nothing was changed.");
+        auto* drums = findDrums(track);
+        if (!drums && editMgr_->getTrackInstrument(track)) return noDrums(id, track);
+
+        // One undo step loads the Drum Machine (if needed) and the kit.
+        editMgr_->edit()->getUndoManager().beginNewTransaction("AI: Load Drum Kit");
+        QJsonObject out;
+        if (!drums) {
+            drums = dynamic_cast<DrumMachinePlugin*>(editMgr_->setTrackDrumMachine(*track));
+            if (!drums) return err(id, "Could not create the Drum Machine.");
+            out["drum_machine_created"] = true;
+            emitTracksChanged();
+        }
+        drums->setKit(*kit, {});
+        emitEditChanged();
+        out["loaded"] = Drums::findKitPreset(input["name"].toString(), folder)->name;
+        out["pads"] = padSummary(drums->kit());
+        if (!drums->warnings().isEmpty()) out["warnings"] = QJsonArray::fromStringList(drums->warnings());
+        return ok(id, out);
+    };
+
+    handlers_["save_drum_kit"] = [this, findDrums, noDrums](const QJsonObject& input, const QString& id) -> AiToolResult {
+        auto* track = resolveTrack(input["track"]);
+        if (!track) return err(id, "Track not found.");
+        auto* drums = findDrums(track);
+        if (!drums) return noDrums(id, track);
+        const QString folder = Drums::samplesFolder();
+        const QString name = input["name"].toString().trimmed();
+        QString error;
+        QStringList outside;
+        if (!Drums::saveKitPreset(drums->kit(), name, folder, input["overwrite"].toBool(false), &error, &outside))
+            return err(id, error);
+        QJsonObject out{ { "saved", Drums::findKitPreset(name, folder)->name },
+                         { "file", Drums::findKitPreset(name, folder)->file } };
+        if (!outside.isEmpty())
+            out["outside_samples_folder"] = QString("These samples are outside the samples folder, so the preset "
+                                                    "only finds them on this computer: %1.").arg(outside.join(", "));
+        return ok(id, out);
     };
 
     handlers_["create_drum_machine"] = [this](const QJsonObject& input, const QString& id) -> AiToolResult {
