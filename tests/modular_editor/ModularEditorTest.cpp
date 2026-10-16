@@ -9,6 +9,7 @@
 #include "engine/EditManager.h"
 #include "ai/AiToolExecutor.h"
 #include "engine/PluginScanner.h"
+#include "drums/SampleLibrary.h"
 #include "engine/drums/DrumMachinePlugin.h"
 #include "engine/modular/ModularSynthPlugin.h"
 #include "ui/controls/RotaryKnob.h"
@@ -23,6 +24,7 @@
 #include <QJsonDocument>
 #include <QMouseEvent>
 #include <QPushButton>
+#include <QTemporaryDir>
 #include <cstdio>
 
 using namespace OpenDaw;
@@ -70,11 +72,32 @@ bool hasCable(const M::Patch& p, const char* from, const char* to)
 
 } // namespace
 
+// 0.1 s of a 440 Hz sine, stereo, 22.05 kHz.
+void writeTestWav(const juce::File& wav)
+{
+    wav.deleteFile();
+    wav.getParentDirectory().createDirectory();
+    juce::WavAudioFormat format;
+    std::unique_ptr<juce::OutputStream> stream(wav.createOutputStream().release());
+    std::unique_ptr<juce::AudioFormatWriter> writer(
+        format.createWriterFor(stream.get(), 22050.0, 2, 16, {}, 0));
+    if (!writer) return;
+    stream.release();   // the writer owns it now
+    juce::AudioBuffer<float> buffer(2, 2205);
+    for (int i = 0; i < 2205; ++i)
+        buffer.setSample(0, i, 0.5f * std::sin(6.283185307 * 440.0 * i / 22050.0)),
+        buffer.setSample(1, i, buffer.getSample(0, i));
+    writer->writeFromAudioSampleBuffer(buffer, 0, 2205);
+}
+
 int main(int argc, char** argv)
 {
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
     QApplication app(argc, argv);
+    // Own settings, so the user's samples folder is never touched.
+    QCoreApplication::setOrganizationName("OpenDawTests");
+    QCoreApplication::setApplicationName("ModularEditorTest");
     juce::ScopedJuceInitialiser_GUI juceInit;
 
     JuceQtBridge bridge;
@@ -366,21 +389,7 @@ int main(int argc, char** argv)
             // A real WAV file loads (written here, 0.1 s of a 440 Hz sine, stereo, 22.05 kHz).
             const auto wav = juce::File::getSpecialLocation(juce::File::tempDirectory)
                                  .getChildFile("opendaw_drum_test.wav");
-            wav.deleteFile();
-            {
-                juce::WavAudioFormat format;
-                std::unique_ptr<juce::OutputStream> stream(wav.createOutputStream().release());
-                std::unique_ptr<juce::AudioFormatWriter> writer(
-                    format.createWriterFor(stream.get(), 22050.0, 2, 16, {}, 0));
-                if (writer) {
-                    stream.release();   // the writer owns it now
-                    juce::AudioBuffer<float> buffer(2, 2205);
-                    for (int i = 0; i < 2205; ++i)
-                        buffer.setSample(0, i, 0.5f * std::sin(6.283185307 * 440.0 * i / 22050.0)),
-                        buffer.setSample(1, i, buffer.getSample(0, i));
-                    writer->writeFromAudioSampleBuffer(buffer, 0, 2205);
-                }
-            }
+            writeTestWav(wav);
             kit.padForNote(Drums::Gm::Clap)->sample = QString::fromStdString(wav.getFullPathName().toStdString());
             drums->setKit(kit, "Load Sample");
             EXPECT(wav.existsAsFile());
@@ -456,6 +465,23 @@ int main(int argc, char** argv)
         EXPECT(ok6 && hasTom && drums && r6["kit"].toObject()["pads"].toArray().size() == int(drums->kit().pads.size()));
         auto [ok7, r7] = call("list_drum_styles", {});
         EXPECT(ok7 && r7["styles"].toArray().size() >= 15);
+
+        // Samples are named relative to the samples folder, which get_drum_kit reports;
+        // an absolute path inside it is stored relative too.
+        QTemporaryDir samples;
+        Drums::setSamplesFolder(samples.path());
+        writeTestWav(juce::File(juce::String((samples.path() + "/Acoustic/snare.wav").toStdString())));
+        EXPECT(call("get_drum_kit", QJsonObject{ { "track", "Groove" } }).second["samples_folder"] == samples.path());
+        auto [ok9, r9] = call("set_drum_pad", QJsonObject{ { "track", "Groove" }, { "note", 38 }, { "source", "sample" },
+                                                           { "sample", "Acoustic/snare.wav" } });
+        EXPECT(ok9 && drums && drums->kit().padForNote(38)->sample == "Acoustic/snare.wav");
+        EXPECT(drums && drums->warnings().isEmpty());
+        auto [ok10, r10] = call("set_drum_pad", QJsonObject{ { "track", "Groove" }, { "note", 40 }, { "source", "sample" },
+                                                             { "sample", samples.path() + "/Acoustic/snare.wav" } });
+        EXPECT(ok10 && drums && drums->kit().padForNote(40)->sample == "Acoustic/snare.wav");
+        const auto missing = tools.execute(AiToolCall{ "t9", "set_drum_pad",
+            QJsonObject{ { "track", "Groove" }, { "note", 41 }, { "source", "sample" }, { "sample", "Acoustic/nope.wav" } } });
+        EXPECT(missing.isError && missing.content.contains(samples.path()));
 
         // A track with another instrument keeps it, and the result says so.
         auto* synthTrack = editMgr.addMidiTrack();

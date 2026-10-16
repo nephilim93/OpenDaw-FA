@@ -1,4 +1,6 @@
 #include "FileBrowserPanel.h"
+#include "drums/SampleLibrary.h"
+#include "ui/drums/DrumsViewLink.h"
 #include "utils/ThemeManager.h"
 #include <QDir>
 #include <QStandardPaths>
@@ -42,6 +44,11 @@ FileBrowserPanel::FileBrowserPanel(juce::AudioDeviceManager& deviceManager,
         QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation));
     locationCombo_->addItem("Home",
         QDir::homePath());
+    locationCombo_->addItem("Samples", Drums::samplesFolder());
+    const int samplesIndex = locationCombo_->count() - 1;
+    connect(&DrumsViewLink::instance(), &DrumsViewLink::samplesFolderChanged, this, [this, samplesIndex]() {
+        locationCombo_->setItemData(samplesIndex, Drums::samplesFolder());
+    });
 
     connect(locationCombo_, qOverload<int>(&QComboBox::currentIndexChanged),
             this, [this](int idx) {

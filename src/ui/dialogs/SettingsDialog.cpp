@@ -1,9 +1,12 @@
 #include "SettingsDialog.h"
 #include "AudioSettingsPage.h"
 #include "ai/AiService.h"
+#include "drums/SampleLibrary.h"
 #include "engine/AudioEngine.h"
 #include "engine/EditManager.h"
 #include "engine/PluginScanner.h"
+#include "engine/drums/DrumMachinePlugin.h"
+#include "ui/drums/DrumsViewLink.h"
 #include "utils/AppPaths.h"
 #include <QCheckBox>
 #include <QComboBox>
@@ -665,6 +668,43 @@ QWidget* SettingsDialog::createSystemPage()
     layout->addWidget(group);
     layout->addWidget(makeNote(
         "New projects are saved to the project folder unless you pick another one.", page));
+
+    auto* samplesGroup = new QGroupBox("Samples", page);
+    auto* samplesForm = new QFormLayout(samplesGroup);
+    auto* samplesDir = new QLineEdit(Drums::samplesFolder(), samplesGroup);
+    samplesDir->setAccessibleName("Samples folder");
+    samplesDir->setPlaceholderText(Drums::defaultSamplesFolder());
+    auto* samplesBrowse = new QPushButton("Browse...", samplesGroup);
+    auto* samplesRow = new QHBoxLayout();
+    samplesRow->addWidget(samplesDir, 1);
+    samplesRow->addWidget(samplesBrowse);
+    samplesForm->addRow("Samples Folder:", samplesRow);
+
+    // Pads keep paths relative to this folder, so every Drum Machine reads
+    // its files again from the new one.
+    auto apply = [this](const QString& dir) {
+        if (QDir::cleanPath(dir.trimmed()) == QDir::cleanPath(Drums::samplesFolder())) return;
+        Drums::setSamplesFolder(dir);
+        if (auto* edit = editMgr_.edit())
+            for (auto* plugin : te::getAllPlugins(*edit, false))
+                if (auto* drums = dynamic_cast<DrumMachinePlugin*>(plugin))
+                    drums->reloadSamples();
+        DrumsViewLink::instance().notifySamplesFolderChanged();
+    };
+    connect(samplesDir, &QLineEdit::editingFinished, this, [samplesDir, apply]() {
+        apply(samplesDir->text());
+    });
+    connect(samplesBrowse, &QPushButton::clicked, this, [this, samplesDir, apply]() {
+        const QString dir = QFileDialog::getExistingDirectory(this, "Samples Folder", samplesDir->text());
+        if (dir.isEmpty()) return;
+        samplesDir->setText(dir);
+        apply(dir);
+    });
+    layout->addWidget(samplesGroup);
+    layout->addWidget(makeNote(
+        "Drag samples from this folder onto Drum Machine pads (the Drums tab lists it). "
+        "Kits store these samples relative to the folder, so they keep working when you "
+        "move the folder or open the project on another computer.", page));
 
     auto* logGroup = new QGroupBox("Diagnostics", page);
     auto* logLayout = new QHBoxLayout(logGroup);

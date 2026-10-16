@@ -1,6 +1,8 @@
 #include "DrumMachinePlugin.h"
+#include "drums/SampleLibrary.h"
 #include <QJsonDocument>
 #include <cmath>
+#include <set>
 
 namespace OpenDaw {
 
@@ -93,12 +95,19 @@ std::shared_ptr<const Drums::SampleData> DrumMachinePlugin::loadSample(const QSt
 void DrumMachinePlugin::rebuild()
 {
     Drums::SampleMap samples;
+    // Pads name their files as the kit stores them (relative to the samples
+    // folder, or absolute); the cache is keyed by the file actually read.
+    std::set<QString> used;
+    const QString folder = Drums::samplesFolder();
     for (const auto& pad : kit_.pads)
-        if (pad.source == Drums::PadSource::Sample)
-            if (auto data = loadSample(pad.sample)) samples[pad.sample] = data;
+        if (pad.source == Drums::PadSource::Sample) {
+            const QString file = Drums::resolveSamplePath(pad.sample, folder);
+            used.insert(file);
+            if (auto data = loadSample(file)) samples[pad.sample] = data;
+        }
     // Forget files no pad uses any more.
     for (auto it = sampleCache_.begin(); it != sampleCache_.end();)
-        it = samples.count(it->first) ? std::next(it) : sampleCache_.erase(it);
+        it = used.count(it->first) ? std::next(it) : sampleCache_.erase(it);
 
     QStringList warnings;
     auto fresh = Drums::DrumEngine::build(kit_, sampleRate_, samples, &warnings);
@@ -110,6 +119,12 @@ void DrumMachinePlugin::rebuild()
         std::swap(engine_, fresh);
     }
     // `fresh` now holds the old engine and is freed here, off the audio thread.
+}
+
+void DrumMachinePlugin::reloadSamples()
+{
+    sampleCache_.clear();
+    rebuild();
 }
 
 void DrumMachinePlugin::initialise(const te::PluginInitialisationInfo& info)

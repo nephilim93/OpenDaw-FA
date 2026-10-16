@@ -1,6 +1,7 @@
 #include "AiToolDefs.h"
 #include "AiToolExecutor.h"
 #include "drums/DrumKit.h"
+#include "drums/SampleLibrary.h"
 #include "engine/EditManager.h"
 #include "engine/drums/DrumMachinePlugin.h"
 #include "modular/Patch.h"
@@ -130,7 +131,8 @@ QJsonArray AiToolDefs::drumTools()
         "Change, add or remove one pad of a Drum Machine's kit, as one undoable step. Only the "
         "fields you give change. Synth pads use a drum voice (kick, snare, hihat, clap, tom, "
         "cymbal, rimshot, cowbell, ...) with optional parameter values (see get_drum_kit); "
-        "sample pads play an audio file (wav, aiff, flac, ogg) by absolute path.",
+        "sample pads play an audio file (wav, aiff, flac, ogg): a path relative to the user's "
+        "samples folder (preferred, so the kit travels; see get_drum_kit) or an absolute one.",
         QJsonObject{
             { "track", trackRef() },
             { "note", numberOf("The pad's MIDI note (GM: 36 kick, 38 snare, 42 closed hat...).", 0, 127) },
@@ -138,7 +140,7 @@ QJsonArray AiToolDefs::drumTools()
             { "source", propOf("string", "\"synth\" or \"sample\".") },
             { "module", propOf("string", "Synth pads: the drum voice, e.g. \"tom\". Changing it resets its params.") },
             { "params", propOf("object", "Synth pads: parameter values by name, e.g. {\"tune\": 160, \"decay\": 0.3}; merged with the current ones.") },
-            { "sample", propOf("string", "Sample pads: absolute path of the audio file.") },
+            { "sample", propOf("string", "Sample pads: the audio file, relative to the samples folder (e.g. \"808/kick.wav\") or absolute.") },
             { "level", numberOf("Linear gain, 0-1.5 (default 0.8).", 0, 1.5) },
             { "pan", numberOf("-1 left .. 1 right.", -1, 1) },
             { "tune", numberOf("Semitones, -24..24.", -24, 24) },
@@ -213,7 +215,8 @@ void AiToolExecutor::registerDrumHandlers()
         if (!track) return err(id, "Track not found.");
         auto* drums = findDrums(track);
         if (!drums) return noDrums(id, track);
-        QJsonObject out{ { "kit", drums->kit().toJson() }, { "synth_voices", synthModulesJson() } };
+        QJsonObject out{ { "kit", drums->kit().toJson() }, { "synth_voices", synthModulesJson() },
+                         { "samples_folder", Drums::samplesFolder() } };
         if (!drums->warnings().isEmpty()) out["warnings"] = QJsonArray::fromStringList(drums->warnings());
         return ok(id, out);
     };
@@ -255,10 +258,15 @@ void AiToolExecutor::registerDrumHandlers()
                 pad["params"] = params;
             }
             if (pad["source"].toString() == "sample") {
-                const QString path = pad["sample"].toString();
-                if (!path.isEmpty() && !QFileInfo(path).isFile())
-                    return err(id, QString("No such file: %1. Use an absolute path to a wav, aiff, "
-                                           "flac or ogg file. Nothing was changed.").arg(path));
+                const QString folder = Drums::samplesFolder();
+                const QString path = pad["sample"].toString().trimmed();
+                const QString file = Drums::resolveSamplePath(path, folder);
+                if (!path.isEmpty() && !QFileInfo(file).isFile())
+                    return err(id, QString("No such file: %1. Give a wav, aiff, flac or ogg file, relative "
+                                           "to the samples folder (%2) or absolute. Nothing was changed.")
+                                       .arg(file, folder));
+                // Files inside the samples folder are kept relative, so the kit travels.
+                if (!path.isEmpty()) pad["sample"] = Drums::toKitPath(file, folder);
             } else if (!pad.contains("module")) {
                 return err(id, QString("A new synth pad needs a module. Use one of: %1.")
                                    .arg(Drums::synthPadModules().join(", ")));

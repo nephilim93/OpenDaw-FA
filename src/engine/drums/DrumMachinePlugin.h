@@ -27,6 +27,9 @@ public:
     void setKit(const Drums::Kit& kit, const juce::String& undoName);
     // Why pads are silent (missing samples, ...), from the last build.
     QStringList warnings() const { return warnings_; }
+    // Reads every sample file again, e.g. after the samples folder changed
+    // (relative pad paths now name other files) or files were replaced.
+    void reloadSamples();
     // Plays a pad as if its note arrived, at the start of the next block the
     // audio thread renders (message thread; never blocks either side). Hits
     // beyond the queue's capacity, or not rendered within kAuditionMaxAgeMs

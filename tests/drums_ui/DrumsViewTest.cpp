@@ -4,6 +4,7 @@
 // reach the engine. Run with QT_QPA_PLATFORM=offscreen.
 
 #include "app/JuceQtBridge.h"
+#include "drums/SampleLibrary.h"
 #include "engine/AudioEngine.h"
 #include "engine/EditManager.h"
 #include "engine/drums/DrumMachinePlugin.h"
@@ -11,6 +12,8 @@
 #include "ui/drums/DrumPadEditor.h"
 #include "ui/drums/DrumPadWidget.h"
 #include "ui/drums/DrumsView.h"
+#include "ui/drums/DrumsViewLink.h"
+#include "ui/drums/SampleBrowser.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -21,6 +24,7 @@
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QTemporaryDir>
+#include <QTreeView>
 #include <cmath>
 #include <cstdio>
 
@@ -134,6 +138,9 @@ int main(int argc, char** argv)
     if (qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM"))
         qputenv("QT_QPA_PLATFORM", "offscreen");
     QApplication app(argc, argv);
+    // Own settings, so the user's samples folder is never touched.
+    QCoreApplication::setOrganizationName("OpenDawTests");
+    QCoreApplication::setApplicationName("DrumsViewTest");
     juce::ScopedJuceInitialiser_GUI juceInit;
 
     JuceQtBridge bridge;
@@ -150,6 +157,8 @@ int main(int argc, char** argv)
     }
     auto& um = editMgr.edit()->getUndoManager();
     QTemporaryDir tmp;
+    const QString samplesDir = QDir(tmp.path()).filePath("Samples");
+    D::setSamplesFolder(samplesDir);
 
     DrumsView view(&editMgr);
     view.resize(1200, 600);
@@ -429,6 +438,62 @@ int main(int argc, char** argv)
                 EXPECT(peak(render(*c, n)) > 0.05f);
             }
         }
+    }
+
+    // ── Samples in the samples folder are stored relative to it ──
+    std::printf("samples folder\n");
+    um.clearUndoHistory();
+    {
+        QDir().mkpath(samplesDir + "/808");
+        const QString kickPath = samplesDir + "/808/kick.wav";
+        EXPECT(writeWav(juce::File(juce::String(kickPath.toStdString())), 0.25));
+        view.sampleBrowser()->refresh();
+        EXPECT(view.sampleBrowser()->folder() == samplesDir);
+        EXPECT(view.sampleBrowser()->tree()->isVisibleTo(&view));
+
+        drop(view.padWidget(D::Gm::Kick), { QUrl::fromLocalFile(kickPath) });
+        settle();
+        const auto* pad = dm->kit().padForNote(D::Gm::Kick);
+        EXPECT(pad && pad->source == D::PadSource::Sample && pad->sample == "808/kick.wav");
+        EXPECT(dm->warnings().isEmpty());
+        EXPECT(view.padWidget(D::Gm::Kick) && view.padWidget(D::Gm::Kick)->sourceText() == "kick.wav");
+
+        // The folder moves (or the project opens elsewhere): the kit follows it.
+        const QString moved = QDir(tmp.path()).filePath("Moved Samples");
+        EXPECT(QDir().rename(samplesDir, moved));
+        D::setSamplesFolder(moved);
+        dm->reloadSamples();
+        DrumsViewLink::instance().notifySamplesFolderChanged();
+        settle();
+        EXPECT(dm->warnings().isEmpty());
+        EXPECT(dm->kit().padForNote(D::Gm::Kick)->sample == "808/kick.wav");
+        EXPECT(view.sampleBrowser()->folder() == moved);
+
+        // A folder without the file: the pad is reported missing, in the banner too.
+        D::setSamplesFolder(QDir(tmp.path()).filePath("Empty"));
+        dm->reloadSamples();
+        DrumsViewLink::instance().notifySamplesFolderChanged();
+        settle();
+        EXPECT(dm->warnings().join(" ").contains("808/kick.wav"));
+        EXPECT(view.warningText().contains("808/kick.wav"));
+        EXPECT(view.padWidget(D::Gm::Kick) && !view.padWidget(D::Gm::Kick)->warning().isEmpty());
+
+        D::setSamplesFolder(moved);
+        dm->reloadSamples();
+        DrumsViewLink::instance().notifySamplesFolderChanged();
+        settle();
+        EXPECT(view.warningText().isEmpty());
+
+        // Double-clicking a sample in the browser loads it on the selected pad.
+        um.clearUndoHistory();
+        view.selectPad(D::Gm::Snare, false);
+        emit view.sampleBrowser()->sampleActivated(moved + "/808/kick.wav");
+        settle();
+        pad = dm->kit().padForNote(D::Gm::Snare);
+        EXPECT(pad && pad->source == D::PadSource::Sample && pad->sample == "808/kick.wav");
+        EXPECT(countUndoSteps(um) == 1);
+        // Samples outside the folder keep their absolute path.
+        EXPECT(dm->kit().padForNote(D::Gm::Clap)->sample == wavPath);
     }
 
     // ── A track without a Drum Machine shows the Load button ──

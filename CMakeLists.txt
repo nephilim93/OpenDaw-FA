@@ -177,6 +177,7 @@ set(OpenDaw_SOURCES
     src/ui/drums/DrumPadEditor.h          src/ui/drums/DrumPadEditor.cpp
     src/ui/drums/DrumsViewLink.h          src/ui/drums/DrumsViewLink.cpp
     src/ui/drums/GmDrumNames.h            src/ui/drums/GmDrumNames.cpp
+    src/ui/drums/SampleBrowser.h          src/ui/drums/SampleBrowser.cpp
     src/ui/sheetmusic/SheetMusicView.h    src/ui/sheetmusic/SheetMusicView.cpp
     src/ui/sheetmusic/NotationModel.h     src/ui/sheetmusic/NotationModel.cpp
     src/ui/sheetmusic/ScoreScene.h        src/ui/sheetmusic/ScoreScene.cpp
@@ -191,6 +192,7 @@ set(OpenDaw_SOURCES
     src/music/Quantize.h           src/music/Quantize.cpp
     src/drums/DrumKit.h            src/drums/DrumKit.cpp
     src/drums/DrumEngine.h         src/drums/DrumEngine.cpp
+    src/drums/SampleLibrary.h      src/drums/SampleLibrary.cpp
     src/engine/drums/DrumMachinePlugin.h src/engine/drums/DrumMachinePlugin.cpp
     src/ai/AiTypes.h
     src/ai/AiAudioAnalysis.h      src/ai/AiAudioAnalysis.cpp

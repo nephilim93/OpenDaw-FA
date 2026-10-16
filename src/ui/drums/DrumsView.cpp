@@ -1,6 +1,9 @@
 #include "DrumsView.h"
 #include "DrumPadWidget.h"
+#include "DrumsViewLink.h"
 #include "GmDrumNames.h"
+#include "SampleBrowser.h"
+#include "drums/SampleLibrary.h"
 #include "engine/drums/DrumMachinePlugin.h"
 #include "utils/ThemeManager.h"
 #include <QDragEnterEvent>
@@ -108,7 +111,7 @@ DrumsView::DrumsView(EditManager* editMgr, QWidget* parent)
     titleLabel_ = new QLabel(editorPage);
     titleLabel_->setStyleSheet(QString("color: %1; font-weight: bold;").arg(theme.text.name()));
     header->addWidget(titleLabel_);
-    auto* hint = new QLabel("Click a pad to play it; drop an audio file on a pad to use it", editorPage);
+    auto* hint = new QLabel("Click a pad to play it; drag a sample onto a pad to use it", editorPage);
     hint->setStyleSheet(QString("color: %1; font-size: 10px;").arg(theme.textDim.name()));
     header->addWidget(hint);
     header->addStretch();
@@ -127,6 +130,11 @@ DrumsView::DrumsView(EditManager* editMgr, QWidget* parent)
     editorLayout->addWidget(warningBar_);
 
     auto* splitter = new QSplitter(Qt::Horizontal, editorPage);
+    sampleBrowser_ = new SampleBrowser(splitter);
+    connect(sampleBrowser_, &SampleBrowser::sampleActivated, this, [this](const QString& path) {
+        loadSample(selectedNote_, path);   // no pad selected (-1): a new pad
+    });
+    splitter->addWidget(sampleBrowser_);
     auto* gridScroll = new QScrollArea(splitter);
     gridScroll->setWidgetResizable(true);
     gridScroll->setFrameStyle(0);
@@ -152,8 +160,9 @@ DrumsView::DrumsView(EditManager* editMgr, QWidget* parent)
     connect(editor_, &DrumPadEditor::browseRequested, this, &DrumsView::browseSample);
     editorScroll->setWidget(editor_);
     splitter->addWidget(editorScroll);
-    splitter->setStretchFactor(0, 3);
-    splitter->setStretchFactor(1, 2);
+    splitter->setStretchFactor(0, 1);
+    splitter->setStretchFactor(1, 3);
+    splitter->setStretchFactor(2, 2);
     editorLayout->addWidget(splitter, 1);
 
     // Floats over the pads so a refused edit doesn't shift the layout.
@@ -176,6 +185,8 @@ DrumsView::DrumsView(EditManager* editMgr, QWidget* parent)
     connect(editMgr_, &EditManager::aboutToChangeEdit, this, [this]() { setTrack(nullptr); });
     connect(editMgr_, &EditManager::tracksChanged, this, &DrumsView::refreshTarget);
     connect(editMgr_, &EditManager::editChanged, this, &DrumsView::refreshTarget);
+    // Relative samples now name other files: the warnings may have changed.
+    connect(&DrumsViewLink::instance(), &DrumsViewLink::samplesFolderChanged, this, &DrumsView::scheduleRebuild);
 
     updatePage();
 }
@@ -469,7 +480,8 @@ bool DrumsView::loadSample(int note, const QString& path)
                       .arg(QFileInfo(path).fileName()));
         return false;
     }
-    const QString file = QFileInfo(path).absoluteFilePath();
+    // Inside the samples folder the kit keeps a relative path, so it travels.
+    const QString file = Drums::toKitPath(QFileInfo(path).absoluteFilePath(), Drums::samplesFolder());
     if (note >= 0)
         return editPad(note, [file](Drums::Pad& p) {
             p.source = Drums::PadSource::Sample;
@@ -507,7 +519,9 @@ bool DrumsView::dropFiles(int note, const QList<QUrl>& urls)
 void DrumsView::browseSample(int note)
 {
     const auto* pad = kit_.padForNote(note);
-    const QString start = pad && !pad->sample.isEmpty() ? QFileInfo(pad->sample).absolutePath() : QString();
+    const QString start = pad && !pad->sample.isEmpty()
+                              ? QFileInfo(Drums::resolveSamplePath(pad->sample)).absolutePath()
+                              : Drums::samplesFolder();
     const QString path = QFileDialog::getOpenFileName(this, "Load Sample", start,
                                                       "Audio Files (*.wav *.aiff *.aif *.flac *.ogg)");
     if (path.isEmpty() || !loadSample(note, path))

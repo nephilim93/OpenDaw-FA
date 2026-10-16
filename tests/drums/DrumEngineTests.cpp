@@ -1,6 +1,11 @@
 #include "../modular/TestHarness.h"
 #include "drums/DrumEngine.h"
 #include "drums/DrumKit.h"
+#include "drums/SampleLibrary.h"
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
 #include <QJsonArray>
 #include <algorithm>
 #include <cmath>
@@ -294,4 +299,49 @@ TEST(drums, whole_kit_is_finite_and_quiet_pads_idle)
     CHECK(maxAbs(out.left, 100, 4000) > 0.3);
     // Longest pad decay is 2.5 s at -60 dB; by 5 s everything is far below that.
     CHECK(maxAbs(out.left, int(kRate * 5), len) < 1e-4);
+}
+
+// ── Samples folder: kit paths ───────────────────────────────────────────────
+
+TEST(drums, sample_paths_inside_the_folder_are_relative)
+{
+    QTemporaryDir root;
+    CHECK(root.isValid());
+    const QString folder = root.path() + "/Samples";
+    QDir().mkpath(folder + "/808");
+    QDir().mkpath(root.path() + "/Samples2");
+    const QString kick = folder + "/808/kick.wav";
+    QFile(kick).open(QIODevice::WriteOnly);
+
+    CHECK(D::toKitPath(kick, folder) == "808/kick.wav");
+    CHECK(D::toKitPath(folder + "/808/../808/kick.wav", folder) == "808/kick.wav");
+    // A trailing slash on the folder changes nothing.
+    CHECK(D::toKitPath(kick, folder + "/") == "808/kick.wav");
+    // A file that doesn't exist (yet) still maps by its path.
+    CHECK(D::toKitPath(folder + "/new/snare.wav", folder) == "new/snare.wav");
+    // Outside the folder (including a sibling whose name starts the same): absolute.
+    const QString outside = root.path() + "/Samples2/clap.wav";
+    CHECK(QDir::isAbsolutePath(D::toKitPath(outside, folder)));
+    CHECK(D::toKitPath(outside, folder).endsWith("/Samples2/clap.wav"));
+    CHECK(QDir::isAbsolutePath(D::toKitPath(root.path() + "/hat.wav", folder)));
+    // Already relative, or no folder: unchanged.
+    CHECK(D::toKitPath("808/kick.wav", folder) == "808/kick.wav");
+    CHECK(D::toKitPath(kick, QString()) == kick);
+}
+
+TEST(drums, kit_paths_resolve_against_the_folder)
+{
+    CHECK(D::resolveSamplePath("808/kick.wav", "/music/Samples") == "/music/Samples/808/kick.wav");
+    CHECK(D::resolveSamplePath("/elsewhere/kick.wav", "/music/Samples") == "/elsewhere/kick.wav");
+    CHECK(D::resolveSamplePath("", "/music/Samples").isEmpty());
+    // Moving the folder moves every relative sample with it.
+    CHECK(D::resolveSamplePath("808/kick.wav", "/new/place") == "/new/place/808/kick.wav");
+
+    QTemporaryDir root;
+    const QString folder = root.path() + "/Samples";
+    QDir().mkpath(folder + "/Acoustic");
+    const QString snare = folder + "/Acoustic/snare.wav";
+    QFile(snare).open(QIODevice::WriteOnly);
+    CHECK(QFileInfo(D::resolveSamplePath(D::toKitPath(snare, folder), folder)).canonicalFilePath()
+          == QFileInfo(snare).canonicalFilePath());
 }

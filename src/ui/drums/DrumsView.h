@@ -19,6 +19,7 @@ namespace OpenDaw {
 
 class DrumMachinePlugin;
 class DrumPadWidget;
+class SampleBrowser;
 
 // The "Drums" tab: the selected track's Drum Machine kit as a grid of pads
 // and an editor for the selected one. Every edit goes through
@@ -58,6 +59,7 @@ public:
     int padCount() const { return int(pads_.size()); }
     DrumPadWidget* padWidget(int note) const;
     DrumPadEditor* padEditor() const { return editor_; }
+    SampleBrowser* sampleBrowser() const { return sampleBrowser_; }
     int selectedNote() const { return selectedNote_; }
     QString lastError() const { return lastError_; }
     QString warningText() const;
@@ -97,6 +99,7 @@ private:
     QWidget* gridArea_ = nullptr;
     QGridLayout* gridLayout_ = nullptr;
     DrumPadEditor* editor_ = nullptr;
+    SampleBrowser* sampleBrowser_ = nullptr;
 
     std::vector<DrumPadWidget*> pads_;
     int selectedNote_ = -1;
