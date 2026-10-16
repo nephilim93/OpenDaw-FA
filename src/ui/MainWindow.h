@@ -25,6 +25,7 @@ class PianoRollEditor;
 class AudioClipEditor;
 class SheetMusicView;
 class ModularEditorView;
+class DrumsView;
 class VideoPlayerWidget;
 
 class ShortcutFilter : public QObject {
@@ -79,6 +80,7 @@ private:
     void onMidiClipDoubleClicked(te::MidiClip* clip);
     void onAudioClipDoubleClicked(te::WaveAudioClip* clip);
     void showModularEditor(te::AudioTrack* track);
+    void showDrumsView(te::AudioTrack* track);
 
     OpenDawApplication& app_;
     EditManager& editMgr_;
@@ -94,6 +96,7 @@ private:
     RoutingView*       routingView_   = nullptr;
     SheetMusicView*    sheetMusicView_ = nullptr;
     ModularEditorView* modularEditor_ = nullptr;
+    DrumsView*         drumsView_     = nullptr;
     AiChatWidget*      aiChatWidget_  = nullptr;
     AiQuickPrompt*     aiQuickPrompt_ = nullptr;
     VideoPlayerWidget* videoPlayer_   = nullptr;
@@ -106,6 +109,7 @@ private:
     QDockWidget* routingDock_         = nullptr;
     QDockWidget* sheetMusicDock_     = nullptr;
     QDockWidget* modularDock_        = nullptr;
+    QDockWidget* drumsDock_          = nullptr;
     QDockWidget* videoPlayerDock_    = nullptr;
     QDockWidget* aiDock_              = nullptr;
 

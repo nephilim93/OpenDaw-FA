@@ -46,6 +46,15 @@ void DrumMachinePlugin::setKit(const Drums::Kit& kit, const juce::String& undoNa
     kitJson_ = toJsonString(kit);  // valueTreePropertyChanged rebuilds
 }
 
+void DrumMachinePlugin::auditionNote(int note, float velocity)
+{
+    if (note < 0 || note > 127) return;
+    const auto scope = auditionFifo_.write(1);
+    if (scope.blockSize1 > 0)
+        auditions_[size_t(scope.startIndex1)] = { note, juce::jlimit(0.0f, 1.0f, velocity),
+                                                  std::chrono::steady_clock::now() };
+}
+
 void DrumMachinePlugin::loadKitFromState()
 {
     QString error;
@@ -146,6 +155,20 @@ void DrumMachinePlugin::applyToBuffer(const te::PluginRenderContext& fc)
     const juce::SpinLock::ScopedTryLockType lock(engineLock_);
     if (!lock.isLocked() || !engine_) return;  // a kit swap is in progress
     auto& engine = *engine_;
+
+    // Auditions wait in the queue while a kit swap holds the lock. Ones
+    // queued while the audio was stopped would all fire at once: skip them.
+    {
+        const auto scope = auditionFifo_.read(auditionFifo_.getNumReady());
+        const auto oldest = std::chrono::steady_clock::now() - std::chrono::milliseconds(kAuditionMaxAgeMs);
+        auto play = [&](int start, int count) {
+            for (int i = start; i < start + count; ++i)
+                if (const auto& a = auditions_[size_t(i)]; a.queuedAt >= oldest)
+                    engine.noteOn(a.note, a.velocity);
+        };
+        play(scope.startIndex1, scope.blockSize1);
+        play(scope.startIndex2, scope.blockSize2);
+    }
 
     auto renderRange = [&](int from, int to) {
         while (from < to) {

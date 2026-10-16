@@ -3,6 +3,7 @@
 #include "drums/DrumEngine.h"
 #include "drums/DrumKit.h"
 #include "engine/AudioEngine.h"
+#include <chrono>
 #include <memory>
 
 namespace OpenDaw {
@@ -26,6 +27,14 @@ public:
     void setKit(const Drums::Kit& kit, const juce::String& undoName);
     // Why pads are silent (missing samples, ...), from the last build.
     QStringList warnings() const { return warnings_; }
+    // Plays a pad as if its note arrived, at the start of the next block the
+    // audio thread renders (message thread; never blocks either side). Hits
+    // beyond the queue's capacity, or not rendered within kAuditionMaxAgeMs
+    // (the track's audio isn't running), are dropped.
+    void auditionNote(int note, float velocity);
+    static constexpr int kAuditionMaxAgeMs = 250;
+    // Auditions not yet picked up by the audio thread.
+    int pendingAuditions() const { return auditionFifo_.getNumReady(); }
 
     juce::String getName() const override { return getPluginName(); }
     juce::String getPluginType() override { return xmlTypeName; }
@@ -65,6 +74,16 @@ private:
     std::unique_ptr<Drums::DrumEngine> engine_;
     static constexpr int kRenderChunk = 512;
     std::array<float, kRenderChunk> renderL_{}, renderR_{};
+
+    // Single producer (message thread), single consumer (audio thread).
+    struct Audition {
+        int note = 0;
+        float velocity = 0.0f;
+        std::chrono::steady_clock::time_point queuedAt;
+    };
+    static constexpr int kAuditionQueueSize = 32;
+    juce::AbstractFifo auditionFifo_ { kAuditionQueueSize };
+    std::array<Audition, kAuditionQueueSize> auditions_{};
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(DrumMachinePlugin)
 };

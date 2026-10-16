@@ -2,6 +2,8 @@
 #include "ui/effects/PluginEditorWindow.h"
 #include "ui/modular/ModularEditorLink.h"
 #include "engine/modular/ModularSynthPlugin.h"
+#include "engine/drums/DrumMachinePlugin.h"
+#include "ui/drums/DrumsViewLink.h"
 #include "utils/IconFont.h"
 #include "utils/ThemeManager.h"
 #include <QVBoxLayout>
@@ -126,6 +128,8 @@ TrackHeaderWidget::TrackHeaderWidget(te::AudioTrack* track, EditManager* editMgr
                 PluginEditorWindow::showForPlugin(*ext);
             } else if (dynamic_cast<ModularSynthPlugin*>(instr)) {
                 ModularEditorLink::instance().requestOpen(track_);
+            } else if (dynamic_cast<DrumMachinePlugin*>(instr)) {
+                DrumsViewLink::instance().requestOpen(track_);
             } else {
                 emit instrumentSelectRequested(track_);
             }
@@ -146,6 +150,10 @@ TrackHeaderWidget::TrackHeaderWidget(te::AudioTrack* track, EditManager* editMgr
                     } else if (dynamic_cast<ModularSynthPlugin*>(instr)) {
                         menu.addAction("Open Modular Editor", [this]() {
                             ModularEditorLink::instance().requestOpen(track_);
+                        });
+                    } else if (dynamic_cast<DrumMachinePlugin*>(instr)) {
+                        menu.addAction("Open Drums", [this]() {
+                            DrumsViewLink::instance().requestOpen(track_);
                         });
                     }
                     menu.exec(instrumentBtn_->mapToGlobal(pos));

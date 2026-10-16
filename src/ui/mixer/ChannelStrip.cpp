@@ -1,6 +1,8 @@
 #include "ChannelStrip.h"
 #include "engine/modular/ModularSynthPlugin.h"
 #include "ui/modular/ModularEditorLink.h"
+#include "engine/drums/DrumMachinePlugin.h"
+#include "ui/drums/DrumsViewLink.h"
 #include "utils/ThemeManager.h"
 #include "utils/IconFont.h"
 #include <QVBoxLayout>
@@ -169,11 +171,14 @@ void ChannelStrip::setupUI()
                     "border-radius: 3px; font-size: 8px; padding: 1px 3px; }"
                     "QPushButton:hover { background: rgba(255,255,255,25); }")
                 .arg(theme.text.name()));
-        // The Modular Synth opens its editor tab; changing it moves to the
-        // right-click menu, as on the track header.
+        // The Modular Synth and Drum Machine open their editor tabs; changing
+        // the instrument moves to the right-click menu, as on the track header.
         connect(instrumentBtn_, &QPushButton::clicked, this, [this]() {
-            if (dynamic_cast<ModularSynthPlugin*>(editMgr_->getTrackInstrument(track_)))
+            auto* instr = editMgr_->getTrackInstrument(track_);
+            if (dynamic_cast<ModularSynthPlugin*>(instr))
                 ModularEditorLink::instance().requestOpen(track_);
+            else if (dynamic_cast<DrumMachinePlugin*>(instr))
+                DrumsViewLink::instance().requestOpen(track_);
             else
                 emit instrumentSelectRequested(track_);
         });
@@ -185,9 +190,14 @@ void ChannelStrip::setupUI()
                     menu.addAction("Change Instrument...", [this]() {
                         emit instrumentSelectRequested(track_);
                     });
-                    if (dynamic_cast<ModularSynthPlugin*>(editMgr_->getTrackInstrument(track_)))
+                    auto* instr = editMgr_->getTrackInstrument(track_);
+                    if (dynamic_cast<ModularSynthPlugin*>(instr))
                         menu.addAction("Open Modular Editor", [this]() {
                             ModularEditorLink::instance().requestOpen(track_);
+                        });
+                    else if (dynamic_cast<DrumMachinePlugin*>(instr))
+                        menu.addAction("Open Drums", [this]() {
+                            DrumsViewLink::instance().requestOpen(track_);
                         });
                     menu.exec(instrumentBtn_->mapToGlobal(pos));
                 });

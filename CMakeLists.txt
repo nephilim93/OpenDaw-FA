@@ -136,6 +136,7 @@ set(OpenDaw_SOURCES
     src/ui/mixer/MixerView.h        src/ui/mixer/MixerView.cpp
     src/ui/mixer/ChannelStrip.h     src/ui/mixer/ChannelStrip.cpp
     src/ui/transport/TransportBar.h src/ui/transport/TransportBar.cpp
+    src/ui/controls/ParamKnobMapping.h    src/ui/controls/ParamKnobMapping.cpp
     src/ui/controls/RotaryKnob.h    src/ui/controls/RotaryKnob.cpp
     src/ui/controls/VolumeFader.h   src/ui/controls/VolumeFader.cpp
     src/ui/controls/LevelMeter.h    src/ui/controls/LevelMeter.cpp
@@ -171,6 +172,11 @@ set(OpenDaw_SOURCES
     src/ui/modular/ModulePanelItem.h      src/ui/modular/ModulePanelItem.cpp
     src/ui/modular/FaustCodeDialog.h      src/ui/modular/FaustCodeDialog.cpp
     src/ui/modular/ModularEditorLink.h    src/ui/modular/ModularEditorLink.cpp
+    src/ui/drums/DrumsView.h              src/ui/drums/DrumsView.cpp
+    src/ui/drums/DrumPadWidget.h          src/ui/drums/DrumPadWidget.cpp
+    src/ui/drums/DrumPadEditor.h          src/ui/drums/DrumPadEditor.cpp
+    src/ui/drums/DrumsViewLink.h          src/ui/drums/DrumsViewLink.cpp
+    src/ui/drums/GmDrumNames.h            src/ui/drums/GmDrumNames.cpp
     src/ui/sheetmusic/SheetMusicView.h    src/ui/sheetmusic/SheetMusicView.cpp
     src/ui/sheetmusic/NotationModel.h     src/ui/sheetmusic/NotationModel.cpp
     src/ui/sheetmusic/ScoreScene.h        src/ui/sheetmusic/ScoreScene.cpp
@@ -338,29 +344,36 @@ if(OPENDAW_BUILD_TESTS)
     endforeach()
 endif()
 
-# ── Modular editor test (optional) ──────────────────────────────────────────
-# Drives the Modular patch editor against a real Edit and Modular Synth with
-# Qt's offscreen platform. It needs the whole engine, so it compiles the app
-# sources like the eval runner does; kept apart from the light suite above.
-# Run with: ctest --test-dir build -R modular.editor --output-on-failure
-option(OPENDAW_BUILD_EDITOR_TESTS "Build the Modular editor UI test" OFF)
+# ── Editor UI tests (optional) ──────────────────────────────────────────────
+# Drive the Modular patch editor and the Drums tab against a real Edit with
+# Qt's offscreen platform. They need the whole engine, so each compiles the
+# app sources like the eval runner does; kept apart from the light suite above.
+# Run with: ctest --test-dir build -R "modular.editor|drums.ui" --output-on-failure
+option(OPENDAW_BUILD_EDITOR_TESTS "Build the Modular editor and Drums tab UI tests" OFF)
 if(OPENDAW_BUILD_EDITOR_TESTS)
     enable_testing()
     set(OpenDawEditorTest_SOURCES ${OpenDaw_SOURCES})
     list(REMOVE_ITEM OpenDawEditorTest_SOURCES src/main.cpp)
-    juce_add_console_app(opendaw_modular_editor_test PRODUCT_NAME "OpenDawModularEditorTest")
-    target_sources(opendaw_modular_editor_test PRIVATE ${OpenDawEditorTest_SOURCES}
-                   tests/modular_editor/ModularEditorTest.cpp)
     get_target_property(_od_defs OpenDaw COMPILE_DEFINITIONS)
-    target_compile_definitions(opendaw_modular_editor_test PRIVATE ${_od_defs})
     get_target_property(_od_opts OpenDaw COMPILE_OPTIONS)
-    if(_od_opts)
-        target_compile_options(opendaw_modular_editor_test PRIVATE ${_od_opts})
-    endif()
-    target_include_directories(opendaw_modular_editor_test PRIVATE src ${CMAKE_SOURCE_DIR}/libs/vst2sdk ${FFMPEG_INCLUDE_DIRS})
-    target_link_directories(opendaw_modular_editor_test PRIVATE ${FFMPEG_LIBRARY_DIRS})
     get_target_property(_od_libs OpenDaw LINK_LIBRARIES)
-    target_link_libraries(opendaw_modular_editor_test PRIVATE ${_od_libs})
-    add_test(NAME modular.editor COMMAND opendaw_modular_editor_test)
-    set_tests_properties(modular.editor PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+    function(opendaw_add_ui_test target product test_name test_source)
+        juce_add_console_app(${target} PRODUCT_NAME "${product}")
+        target_sources(${target} PRIVATE ${OpenDawEditorTest_SOURCES} ${test_source})
+        target_compile_definitions(${target} PRIVATE ${_od_defs})
+        if(_od_opts)
+            target_compile_options(${target} PRIVATE ${_od_opts})
+        endif()
+        target_include_directories(${target} PRIVATE src ${CMAKE_SOURCE_DIR}/libs/vst2sdk ${FFMPEG_INCLUDE_DIRS})
+        target_link_directories(${target} PRIVATE ${FFMPEG_LIBRARY_DIRS})
+        target_link_libraries(${target} PRIVATE ${_od_libs})
+        add_test(NAME ${test_name} COMMAND ${target})
+        set_tests_properties(${test_name} PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    endfunction()
+
+    opendaw_add_ui_test(opendaw_modular_editor_test "OpenDawModularEditorTest" modular.editor
+                        tests/modular_editor/ModularEditorTest.cpp)
+    opendaw_add_ui_test(opendaw_drums_ui_test "OpenDawDrumsUiTest" drums.ui
+                        tests/drums_ui/DrumsViewTest.cpp)
 endif()
