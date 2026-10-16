@@ -222,4 +222,20 @@ TEST(patch, warnings)
         { mod("osc", "vco"), mod("vout", "voice_out"), mod("out", "output") },
         { cable("osc.out", "vout.left") })).warnings();
     CHECK_MSG(has(noVoices, "no global 'voices'"), noVoices.join(" | "));
+
+    // A global sound into voice_out is only heard while notes play.
+    const QStringList globalIntoVoice = patchFrom(patchJson(
+        { mod("bd", "noise", {}, "global"),
+          mod("vout", "voice_out"), mod("voices", "voices", {}, "global"), mod("out", "output") },
+        { cable("bd.out", "vout.left"),
+          cable("voices.left", "out.left") })).warnings();
+    CHECK_MSG(has(globalIntoVoice, "'bd' is in the global section but feeds vout.left"),
+              globalIntoVoice.join(" | "));
+    // Global modulation into a voice module is fine: no warning for it.
+    const QStringList modulation = patchFrom(patchJson(
+        { mod("vin", "voice_in"), mod("lfo", "lfo", {}, "global"), mod("osc", "vco"),
+          mod("vout", "voice_out"), mod("voices", "voices", {}, "global"), mod("out", "output") },
+        { cable("vin.pitch", "osc.pitch"), cable("lfo.out", "osc.fm"), cable("osc.out", "vout.left"),
+          cable("voices.left", "out.left") })).warnings();
+    CHECK_MSG(modulation.isEmpty(), modulation.join(" | "));
 }

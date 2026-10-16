@@ -377,6 +377,17 @@ QStringList Patch::warnings() const
         warnings << "Voice modules exist but there is no 'voice_out': voices are not heard.";
     if (hasType("voice_out", Section::Voice) && !hasType("voices", Section::Global))
         warnings << "There is a 'voice_out' but no global 'voices' module to collect it.";
+    // A global signal into voice_out is copied into every playing voice, so it
+    // is silent with no notes held and multiplied by the notes held otherwise.
+    for (const auto& c : cables) {
+        const auto* src = find(c.from.module);
+        const auto* dst = find(c.to.module);
+        if (src && dst && src->section == Section::Global && dst->type == "voice_out")
+            warnings << QString("'%1' is in the global section but feeds %2, which only sounds "
+                                "while notes play (once per note). Connect it to the output "
+                                "(or through a mixer) instead.")
+                            .arg(src->id, c.to.toString());
+    }
     if (!codeModulesAvailable())
         for (const auto& m : modules)
             if (isCodeModule(m))
