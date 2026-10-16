@@ -46,6 +46,13 @@ public:
     bool disconnectCable(const Modular::Cable& cable);
     bool removeModule(const QString& id);
     bool addModule(const QString& type, QPointF scenePos);
+    // Faust code modules: what the code dialog's Save does, one undo step each.
+    // editModuleCode refuses code that would drop cables unless allowed.
+    bool addCodeModule(const QString& code, QPointF scenePos);
+    bool editModuleCode(const QString& id, const QString& code, bool allowDroppedCables = false);
+    // Cables that new code for `id` would drop (ports it no longer has);
+    // empty if none or the code doesn't compile.
+    QVector<Modular::Cable> cablesDroppedBy(const QString& id, const QString& code) const;
     bool setParam(const QString& module, const QString& param, float value);
 
     // Introspection for tests and accessibility.
@@ -67,6 +74,8 @@ protected:
     void showEvent(QShowEvent* event) override;
 
 private:
+    // id empty: a new module at scenePos, starting from the template.
+    void openCodeDialog(const QString& id, QPointF scenePos);
     struct CableEntry {
         CableItem* item = nullptr;
         Modular::Cable cable;

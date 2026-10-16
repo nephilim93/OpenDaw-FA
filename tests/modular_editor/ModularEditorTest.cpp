@@ -9,7 +9,9 @@
 #include "engine/EditManager.h"
 #include "engine/modular/ModularSynthPlugin.h"
 #include "ui/controls/RotaryKnob.h"
+#include "ui/modular/FaustCodeDialog.h"
 #include "ui/modular/ModularEditorView.h"
+#include "ui/modular/ModulePanelItem.h"
 
 #include <QApplication>
 #include <QElapsedTimer>
@@ -217,6 +219,61 @@ int main(int argc, char** argv)
         EXPECT(crusher && crusher->findJack("in", true) && crusher->findJack("out", false));
         EXPECT(crusher && crusher->knob("mix"));
         EXPECT(view.cableItemCount() == int(coded.cables.size()));
+    }
+
+    // ── Writing code modules by hand, as the code dialog does ──
+    if (M::codeModulesAvailable()) {
+        std::printf("code modules by hand\n");
+        synth->setPatch(M::Patch::initPatch(), {});
+        settle();
+        const auto tmpl = M::compileCodeModule("tmpl", FaustCodeDialog::templateCode().toStdString());
+        EXPECT(tmpl.def && tmpl.def->inputs.size() == 1 && tmpl.def->outputs.size() == 1
+               && tmpl.def->params.size() == 2);
+
+        um.clearUndoHistory();
+        const QPointF voiceZone = view.panel("vco1")->scenePos() + QPointF(0, 260);
+        EXPECT(view.addCodeModule(FaustCodeDialog::templateCode(), voiceZone));
+        settle();
+        auto* code = view.panel("code1");
+        EXPECT(code && code->knob("gain") && code->knob("drive") && code->codeError().isEmpty());
+        EXPECT(countUndoSteps(um) == 1);
+        EXPECT(um.getUndoDescription() == "Add Code Module");
+
+        EXPECT(view.connectPorts({ "vco1", "out" }, { "code1", "in" }));
+        settle();
+        um.clearUndoHistory();
+        const QString twoKnobs = "import(\"stdfaust.lib\");\n"
+                                 "gain = hslider(\"gain\", 1, 0, 4, 0.01);\n"
+                                 "tone = hslider(\"tone\", 0.5, 0, 1, 0.01);\n"
+                                 "process = *(gain) : fi.lowpass(1, 200 + tone * 8000);";
+        EXPECT(view.editModuleCode("code1", twoKnobs));
+        settle();
+        code = view.panel("code1");
+        EXPECT(code && code->knob("tone") && code->knob("gain") && !code->knob("drive"));
+        EXPECT(hasCable(synth->patch(), "vco1.out", "code1.in"));   // its port still exists
+        EXPECT(countUndoSteps(um) == 1);
+        EXPECT(um.getUndoDescription() == "Edit Code");
+
+        // Code without an input would drop the vco1 cable: refused unless allowed.
+        um.clearUndoHistory();
+        const QString noInput = "import(\"stdfaust.lib\");\nprocess = os.osc(220);";
+        const auto before = synth->patch().toJson();
+        EXPECT(view.cablesDroppedBy("code1", noInput).size() == 1);
+        EXPECT(!view.editModuleCode("code1", noInput));
+        EXPECT(!view.lastError().isEmpty());
+        EXPECT(synth->patch().toJson() == before);
+        EXPECT(!um.canUndo());
+
+        // A code module without a compiled definition (code from a Faust build
+        // opened in one without Faust) is marked as an error, not an empty box.
+        M::PatchModule uncompiled;
+        uncompiled.id = "code9";
+        uncompiled.type = M::kCodeModuleType;
+        uncompiled.code = "process = _;";
+        const M::Patch empty;
+        ModulePanelItem marked(uncompiled, *M::moduleDef(uncompiled), empty);
+        EXPECT(!marked.codeError().isEmpty());
+        EXPECT(view.panel("code1")->codeError().isEmpty());
     }
 
     // ── Losing the instrument shows the empty state ──

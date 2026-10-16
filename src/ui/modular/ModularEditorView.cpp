@@ -1,4 +1,5 @@
 #include "ModularEditorView.h"
+#include "FaustCodeDialog.h"
 #include <QNativeGestureEvent>
 #include "engine/modular/ModularSynthPlugin.h"
 #include "utils/ThemeManager.h"
@@ -10,7 +11,9 @@
 #include <QLabel>
 #include <QLineF>
 #include <QMenu>
+#include <QMessageBox>
 #include <QMouseEvent>
+#include <QPointer>
 #include <QPushButton>
 #include <QScrollBar>
 #include <QStackedWidget>
@@ -480,6 +483,72 @@ bool ModularEditorView::addModule(const QString& type, QPointF scenePos)
                      "Add Module");
 }
 
+bool ModularEditorView::addCodeModule(const QString& code, QPointF scenePos)
+{
+    return applyEdit({ QJsonObject{
+                         { "op", "write_module" }, { "id", uniqueModuleId("code") }, { "code", code },
+                         { "section", Modular::sectionName(sectionAt(scenePos)) },
+                         { "x", std::round(scenePos.x()) }, { "y", std::round(scenePos.y()) } } },
+                     "Add Code Module");
+}
+
+QVector<Modular::Cable> ModularEditorView::cablesDroppedBy(const QString& id, const QString& code) const
+{
+    QVector<Modular::Cable> dropped;
+    const auto result = Modular::compileCodeModule(id.toStdString(), code.toStdString());
+    if (!result.def) return dropped;
+    for (const auto& c : patch_.cables)
+        if ((c.from.module == id && result.def->outputIndex(c.from.port.toStdString()) < 0)
+            || (c.to.module == id && result.def->inputIndex(c.to.port.toStdString()) < 0))
+            dropped.append(c);
+    return dropped;
+}
+
+bool ModularEditorView::editModuleCode(const QString& id, const QString& code, bool allowDroppedCables)
+{
+    if (!allowDroppedCables) {
+        const auto dropped = cablesDroppedBy(id, code);
+        if (!dropped.isEmpty()) {
+            QStringList names;
+            for (const auto& c : dropped) names << c.from.toString() + " → " + c.to.toString();
+            showError(QString("The new code has no port for %1.").arg(names.join(", ")));
+            return false;
+        }
+    }
+    return applyEdit({ QJsonObject{ { "op", "write_module" }, { "id", id }, { "code", code } } },
+                     "Edit Code");
+}
+
+void ModularEditorView::openCodeDialog(const QString& id, QPointF scenePos)
+{
+    const auto* m = patch_.find(id);
+    const bool adding = !m;
+    auto* dialog = new FaustCodeDialog(adding ? uniqueModuleId("code") : id,
+                                       adding ? FaustCodeDialog::templateCode() : m->code,
+                                       {}, this);
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    QPointer<FaustCodeDialog> guard(dialog);
+    auto save = [this, id, adding, scenePos, guard](const QString& code) -> QString {
+        if (adding) return addCodeModule(code, scenePos) ? QString() : lastError();
+        if (!synth() || !patch_.find(id)) return "This module no longer exists.";
+        const auto dropped = cablesDroppedBy(id, code);
+        bool allow = false;
+        if (!dropped.isEmpty()) {
+            QStringList names;
+            for (const auto& c : dropped) names << c.from.toString() + " → " + c.to.toString();
+            const auto answer = QMessageBox::question(
+                guard, "Remove Cables?",
+                QString("The new code has no port for these cables, so saving removes them:\n%1")
+                    .arg(names.join("\n")));
+            if (answer != QMessageBox::Yes) return "Not saved: the cables were kept.";
+            allow = true;
+        }
+        return editModuleCode(id, code, allow) ? QString() : lastError();
+    };
+    dialog->setSaveFunction(save);
+    dialog->open();
+}
+
 bool ModularEditorView::setParam(const QString& module, const QString& param, float value)
 {
     return applyEdit({ QJsonObject{ { "op", "set_param" }, { "module", module },
@@ -760,6 +829,8 @@ void ModularEditorView::showModuleMenu(ModulePanelItem* panel, const QPoint& scr
     const QString id = panel->moduleId();
     QMenu menu(this);
     menu.setAccessibleName("Module Context Menu");
+    if (const auto* m = patch_.find(id); m && Modular::isCodeModule(*m))
+        menu.addAction("Edit Code…", this, [this, id]() { openCodeDialog(id, {}); });
     menu.addAction(QString("Remove '%1'").arg(id), this, [this, id]() { removeModule(id); });
     menu.exec(screenPos);
 }
@@ -797,6 +868,11 @@ void ModularEditorView::showBackgroundMenu(const QPointF& scenePos, const QPoint
                 label += def.section == Modular::Section::Voice ? "  (Voice)" : "  (Global)";
             auto* action = family->addAction(label, this, [this, type, scenePos]() { addModule(type, scenePos); });
             action->setToolTip(QString::fromStdString(def.description));
+        }
+        if (category == Modular::Category::Code && Modular::codeModulesAvailable()) {
+            auto* code = add->addMenu(Modular::categoryLabel(category));
+            code->addAction("New Faust Module…", this,
+                            [this, scenePos]() { openCodeDialog({}, scenePos); });
         }
     }
     menu.exec(screenPos);

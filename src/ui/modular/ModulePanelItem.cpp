@@ -100,6 +100,12 @@ ModulePanelItem::ModulePanelItem(const Modular::PatchModule& module,
     setZValue(1);
     setCursor(Qt::OpenHandCursor);
     setToolTip(QString::fromStdString(def.description));
+    if (Modular::isCodeModule(module) && !module.codeDef) {
+        codeError_ = !module.codeError.isEmpty() ? module.codeError
+                   : Modular::codeModulesAvailable() ? QString("The code doesn't compile.")
+                   : QString("This build of OpenDaw has no Faust support, so this module is silent.");
+        setToolTip(codeError_);
+    }
 
     jackRows_ = int(std::max(def.inputs.size(), def.outputs.size()));
     auto jackY = [](int row) { return HEADER_HEIGHT + JACK_ROW_HEIGHT * (row + 0.5) + 3.0; };
@@ -282,7 +288,7 @@ void ModulePanelItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, 
     header.addRoundedRect(QRectF(0.0, 0.0, WIDTH, HEADER_HEIGHT), 6, 6);
     header.addRect(QRectF(0.0, HEADER_HEIGHT / 2, WIDTH, HEADER_HEIGHT / 2));
     painter->setPen(Qt::NoPen);
-    painter->setBrush(sectionColor.darker(140));
+    painter->setBrush(codeError_.isEmpty() ? sectionColor.darker(140) : QColor(183, 28, 28));
     painter->drawPath(header.simplified());
 
     QFont titleFont = painter->font();
@@ -298,7 +304,7 @@ void ModulePanelItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, 
     painter->setFont(typeFont);
     painter->setPen(theme.text.darker(130));
     painter->drawText(QRectF(8, 0, WIDTH - 16, HEADER_HEIGHT), Qt::AlignVCenter | Qt::AlignRight,
-                      type_);
+                      codeError_.isEmpty() ? type_ : type_ + " (error)");
 
     painter->setPen(theme.textDim);
     for (int i = 0; i < inputLabels_.size(); ++i)

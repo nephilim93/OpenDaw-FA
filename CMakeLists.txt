@@ -168,6 +168,7 @@ set(OpenDaw_SOURCES
     src/ui/routing/CableItem.h            src/ui/routing/CableItem.cpp
     src/ui/modular/ModularEditorView.h    src/ui/modular/ModularEditorView.cpp
     src/ui/modular/ModulePanelItem.h      src/ui/modular/ModulePanelItem.cpp
+    src/ui/modular/FaustCodeDialog.h      src/ui/modular/FaustCodeDialog.cpp
     src/ui/modular/ModularEditorLink.h    src/ui/modular/ModularEditorLink.cpp
     src/ui/sheetmusic/SheetMusicView.h    src/ui/sheetmusic/SheetMusicView.cpp
     src/ui/sheetmusic/NotationModel.h     src/ui/sheetmusic/NotationModel.cpp

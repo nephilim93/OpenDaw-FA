@@ -39,6 +39,8 @@ public:
 
     QString moduleId() const { return moduleId_; }
     Modular::Section section() const { return section_; }
+    // A code module whose code doesn't compile: why (shown in red).
+    QString codeError() const { return codeError_; }
 
     QRectF boundingRect() const override;
     void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
@@ -86,6 +88,7 @@ private:
 
     QString moduleId_;
     QString type_;
+    QString codeError_;
     Modular::Section section_;
     qreal height_ = 0.0;
     int jackRows_ = 0;
