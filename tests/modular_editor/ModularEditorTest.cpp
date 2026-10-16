@@ -7,6 +7,7 @@
 #include "app/JuceQtBridge.h"
 #include "engine/AudioEngine.h"
 #include "engine/EditManager.h"
+#include "engine/drums/DrumMachinePlugin.h"
 #include "engine/modular/ModularSynthPlugin.h"
 #include "ui/controls/RotaryKnob.h"
 #include "modular/FaustStarters.h"
@@ -318,6 +319,72 @@ int main(int argc, char** argv)
     settle();
     EXPECT(view.synth() == nullptr);
     EXPECT(view.moduleItemCount() == 0);
+
+    // ── The Drum Machine instrument (not the editor, but this is the app harness) ──
+    std::printf("drum machine\n");
+    {
+        auto* drumTrack = editMgr.addMidiTrack();
+        auto* drums = drumTrack ? dynamic_cast<DrumMachinePlugin*>(editMgr.setTrackDrumMachine(*drumTrack)) : nullptr;
+        EXPECT(drums != nullptr);
+        if (drums) {
+            EXPECT(editMgr.getTrackInstrument(drumTrack) == drums);
+            EXPECT(drums->kit().toJson() == Drums::Kit::defaultKit().toJson());
+            EXPECT(drums->warnings().isEmpty());
+
+            um.clearUndoHistory();
+            auto kit = drums->kit();
+            kit.padForNote(Drums::Gm::Snare)->level = 0.3f;
+            kit.padForNote(Drums::Gm::Kick)->pan = -0.5f;
+            drums->setKit(kit, "Change Pad");
+            EXPECT(drums->kit().padForNote(Drums::Gm::Snare)->level == 0.3f);
+            EXPECT(countUndoSteps(um) == 1);
+            um.undo();
+            EXPECT(drums->kit().padForNote(Drums::Gm::Snare)->level == 0.8f);
+            um.redo();
+            EXPECT(drums->kit().padForNote(Drums::Gm::Kick)->pan == -0.5f);
+
+            // Saved state restores into a fresh plugin (as reopening a project does).
+            auto fresh = editMgr.edit()->getPluginCache().createNewPlugin(
+                juce::String(DrumMachinePlugin::xmlTypeName), {});
+            auto* copy = dynamic_cast<DrumMachinePlugin*>(fresh.get());
+            EXPECT(copy != nullptr);
+            if (copy) {
+                copy->restorePluginStateFromValueTree(drums->state);
+                EXPECT(copy->kit().toJson() == drums->kit().toJson());
+            }
+
+            // A sample pad whose file is missing is reported, not fatal.
+            kit = drums->kit();
+            kit.padForNote(Drums::Gm::Clap)->source = Drums::PadSource::Sample;
+            kit.padForNote(Drums::Gm::Clap)->sample = "/nonexistent/clap.wav";
+            drums->setKit(kit, "Load Sample");
+            EXPECT(drums->warnings().size() == 1 && drums->warnings()[0].contains("clap.wav"));
+
+            // A real WAV file loads (written here, 0.1 s of a 440 Hz sine, stereo, 22.05 kHz).
+            const auto wav = juce::File::getSpecialLocation(juce::File::tempDirectory)
+                                 .getChildFile("opendaw_drum_test.wav");
+            wav.deleteFile();
+            {
+                juce::WavAudioFormat format;
+                std::unique_ptr<juce::OutputStream> stream(wav.createOutputStream().release());
+                std::unique_ptr<juce::AudioFormatWriter> writer(
+                    format.createWriterFor(stream.get(), 22050.0, 2, 16, {}, 0));
+                if (writer) {
+                    stream.release();   // the writer owns it now
+                    juce::AudioBuffer<float> buffer(2, 2205);
+                    for (int i = 0; i < 2205; ++i)
+                        buffer.setSample(0, i, 0.5f * std::sin(6.283185307 * 440.0 * i / 22050.0)),
+                        buffer.setSample(1, i, buffer.getSample(0, i));
+                    writer->writeFromAudioSampleBuffer(buffer, 0, 2205);
+                }
+            }
+            kit.padForNote(Drums::Gm::Clap)->sample = QString::fromStdString(wav.getFullPathName().toStdString());
+            drums->setKit(kit, "Load Sample");
+            EXPECT(wav.existsAsFile());
+            EXPECT(drums->warnings().isEmpty());
+            wav.deleteFile();
+        }
+    }
 
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);
     view.setTrack(nullptr);

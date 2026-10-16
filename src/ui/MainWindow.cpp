@@ -1329,6 +1329,9 @@ void MainWindow::onInstrumentSelectRequested(te::AudioTrack* track)
     menu.addAction("Modular Synth (OpenDaw)", this, [this, track]() {
         editMgr_.setTrackModularSynth(*track);
     });
+    menu.addAction("Drum Machine (OpenDaw)", this, [this, track]() {
+        editMgr_.setTrackDrumMachine(*track);
+    });
     menu.addSeparator();
     menu.addAction("VST Instrument...", this, [this, track]() {
         auto& pluginList = app_.pluginScanner().getPluginList();

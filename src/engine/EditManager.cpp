@@ -1,5 +1,6 @@
 #include "EditManager.h"
 #include "midifx/VelocityFxPlugin.h"
+#include "drums/DrumMachinePlugin.h"
 #include "modular/ModularSynthPlugin.h"
 #include <QSettings>
 #include <QTimer>
@@ -27,7 +28,7 @@ static const juce::Identifier kMidiFxMarker("openDawMidiFx");
 
 static bool isInstrumentPlugin(te::Plugin* p)
 {
-    if (dynamic_cast<ModularSynthPlugin*>(p)) return true;
+    if (dynamic_cast<ModularSynthPlugin*>(p) || dynamic_cast<DrumMachinePlugin*>(p)) return true;
     auto* ext = dynamic_cast<te::ExternalPlugin*>(p);
     return ext && ext->isSynth() && !EditManager::isMidiFxPlugin(ext);
 }
@@ -772,11 +773,20 @@ void EditManager::setTrackInstrument(te::AudioTrack& track,
 
 te::Plugin* EditManager::setTrackModularSynth(te::AudioTrack& track)
 {
+    return setTrackBuiltInInstrument(track, ModularSynthPlugin::xmlTypeName);
+}
+
+te::Plugin* EditManager::setTrackDrumMachine(te::AudioTrack& track)
+{
+    return setTrackBuiltInInstrument(track, DrumMachinePlugin::xmlTypeName);
+}
+
+te::Plugin* EditManager::setTrackBuiltInInstrument(te::AudioTrack& track, const char* xmlType)
+{
     if (!edit_) return nullptr;
     removeTrackInstrument(track);
 
-    auto plugin = edit_->getPluginCache().createNewPlugin(
-        juce::String(ModularSynthPlugin::xmlTypeName), {});
+    auto plugin = edit_->getPluginCache().createNewPlugin(juce::String(xmlType), {});
     if (!plugin) return nullptr;
 
     // After any MIDI FX, so they feed the instrument.

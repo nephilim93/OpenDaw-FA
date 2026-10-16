@@ -97,6 +97,12 @@ std::optional<PortRef> parsePortRef(const QString& text);
 // replaces its code; it compiles here, on the calling (message) thread.
 QString applyOps(Patch& patch, const QJsonArray& ops);
 
+// A parameter value from JSON: a number in range, or a choice name for enum
+// params. On failure returns nullopt and sets *error (with the valid range or
+// choices).
+std::optional<float> parseParamValue(const ParamDef& def, const QJsonValue& v, QString* error);
+QJsonValue paramValueToJson(const ParamDef& def, float value);
+
 // The module catalog as JSON, for the AI.
 QJsonArray catalogJson();
 

@@ -1,5 +1,6 @@
 ﻿#include "AudioEngine.h"
 #include "midifx/VelocityFxPlugin.h"
+#include "drums/DrumMachinePlugin.h"
 #include "modular/ModularSynthPlugin.h"
 #include <QSettings>
 
@@ -54,6 +55,7 @@ AudioEngine::AudioEngine()
     // OpenDaw's own plugin types, so edits can create and reload them.
     engine_->getPluginManager().createBuiltInType<VelocityFxPlugin>();
     engine_->getPluginManager().createBuiltInType<ModularSynthPlugin>();
+    engine_->getPluginManager().createBuiltInType<DrumMachinePlugin>();
 
     engine_->getDeviceManager().addChangeListener(this);
 }

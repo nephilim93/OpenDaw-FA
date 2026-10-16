@@ -29,6 +29,8 @@ QString listTypes()
     return names.join(", ");
 }
 
+} // namespace
+
 // A parameter value from JSON: a number, or a choice name for enum params.
 std::optional<float> parseParamValue(const ParamDef& def, const QJsonValue& v, QString* error)
 {
@@ -65,6 +67,8 @@ QJsonValue paramValueToJson(const ParamDef& def, float value)
     }
     return value;
 }
+
+namespace {
 
 std::optional<Section> parseSection(const QString& s)
 {

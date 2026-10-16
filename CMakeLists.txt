@@ -182,6 +182,9 @@ set(OpenDaw_SOURCES
     src/music/Theory.h             src/music/Theory.cpp
     src/music/Patterns.h           src/music/Patterns.cpp
     src/music/Quantize.h           src/music/Quantize.cpp
+    src/drums/DrumKit.h            src/drums/DrumKit.cpp
+    src/drums/DrumEngine.h         src/drums/DrumEngine.cpp
+    src/engine/drums/DrumMachinePlugin.h src/engine/drums/DrumMachinePlugin.cpp
     src/ai/AiTypes.h
     src/ai/AiAudioAnalysis.h      src/ai/AiAudioAnalysis.cpp
     src/ai/AiToolDefs.h            src/ai/AiToolDefs.cpp
@@ -323,11 +326,11 @@ if(OPENDAW_BUILD_TESTS)
     enable_testing()
     find_package(Qt6 REQUIRED COMPONENTS Core)
     file(GLOB OpenDawModularTests_SOURCES CONFIGURE_DEPENDS
-         tests/modular/*.cpp src/modular/*.cpp)
+         tests/modular/*.cpp src/modular/*.cpp tests/drums/*.cpp src/drums/*.cpp)
     add_executable(opendaw_modular_tests ${OpenDawModularTests_SOURCES} src/music/Theory.cpp)
     target_include_directories(opendaw_modular_tests PRIVATE src)
     target_link_libraries(opendaw_modular_tests PRIVATE Qt6::Core opendaw_faust)
-    foreach(_group patch pitch envelope feedback voices sequencing random fx extra catalog faust synthvoices)
+    foreach(_group patch pitch envelope feedback voices sequencing random fx extra catalog faust synthvoices drums)
         add_test(NAME modular.${_group} COMMAND opendaw_modular_tests ${_group})
     endforeach()
 endif()

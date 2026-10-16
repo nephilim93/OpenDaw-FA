@@ -74,6 +74,7 @@ public:
     void removeTrackInstrument(te::AudioTrack& track);
     // Replaces the track's instrument with OpenDaw's Modular Synth (init patch).
     te::Plugin* setTrackModularSynth(te::AudioTrack& track);
+    te::Plugin* setTrackDrumMachine(te::AudioTrack& track);
 
     // MIDI FX sit before the instrument and process the track's MIDI. VST
     // MIDI FX often report themselves as synths, so they carry a marker in
@@ -230,6 +231,8 @@ signals:
     void audioClipModified(te::WaveAudioClip* clip);
 
 private:
+    // Replaces the track's instrument with one of OpenDaw's own (by XML type).
+    te::Plugin* setTrackBuiltInInstrument(te::AudioTrack& track, const char* xmlType);
     void teardownCurrentEdit();
     void createDefaultEdit();
     void ensureLevelMetersOnAllTracks();
