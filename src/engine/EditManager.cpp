@@ -1,6 +1,7 @@
 #include "EditManager.h"
 #include "midifx/VelocityFxPlugin.h"
 #include "drums/DrumMachinePlugin.h"
+#include "midiports/MidiOutPlugin.h"
 #include "modular/ModularSynthPlugin.h"
 #include <QSettings>
 #include <QTimer>
@@ -28,7 +29,9 @@ static const juce::Identifier kMidiFxMarker("openDawMidiFx");
 
 static bool isInstrumentPlugin(te::Plugin* p)
 {
-    if (dynamic_cast<ModularSynthPlugin*>(p) || dynamic_cast<DrumMachinePlugin*>(p)) return true;
+    if (dynamic_cast<ModularSynthPlugin*>(p) || dynamic_cast<DrumMachinePlugin*>(p)
+        || dynamic_cast<MidiOutPlugin*>(p))
+        return true;
     auto* ext = dynamic_cast<te::ExternalPlugin*>(p);
     return ext && ext->isSynth() && !EditManager::isMidiFxPlugin(ext);
 }
@@ -781,6 +784,11 @@ te::Plugin* EditManager::setTrackDrumMachine(te::AudioTrack& track)
     return setTrackBuiltInInstrument(track, DrumMachinePlugin::xmlTypeName);
 }
 
+te::Plugin* EditManager::setTrackMidiOut(te::AudioTrack& track)
+{
+    return setTrackBuiltInInstrument(track, MidiOutPlugin::xmlTypeName);
+}
+
 te::Plugin* EditManager::setTrackBuiltInInstrument(te::AudioTrack& track, const char* xmlType)
 {
     if (!edit_) return nullptr;
@@ -1057,6 +1065,12 @@ QList<InputSource> EditManager::getAvailableMidiInputSources() const
     auto& dm = audioEngine_.engine().getDeviceManager();
     for (int i = 0; i < dm.getNumMidiInDevices(); ++i) {
         if (auto dev = dm.getMidiInDevice(i)) {
+            // OpenDaw's own "Out" is never an input; of the virtual inputs,
+            // only OpenDaw's own "In" is offered.
+            if (VirtualMidiPorts::isOwnPortSeenAsDevice(dev->getName(), true)) continue;
+            if (dev->getDeviceType() == te::InputDevice::virtualMidiDevice
+                && dev->getName() != VirtualMidiPorts::kInName)
+                continue;
             InputSource src;
             src.deviceName = dev->getName();
             src.displayName = QString::fromStdString(dev->getName().toStdString());
@@ -1089,7 +1103,8 @@ void EditManager::assignMidiInputToTrack(te::AudioTrack& track,
         if (!edit_) return false;
         edit_->getTransport().ensureContextAllocated();
         for (auto* instance : edit_->getAllInputDevices()) {
-            if (instance->getInputDevice().getDeviceType() == te::InputDevice::physicalMidiDevice
+            const auto type = instance->getInputDevice().getDeviceType();
+            if ((type == te::InputDevice::physicalMidiDevice || type == te::InputDevice::virtualMidiDevice)
                 && instance->getInputDevice().getName() == deviceName) {
                 instance->setTarget(itemID, true, &edit_->getUndoManager(), 0);
                 markDirtyAndNotify();
@@ -1113,7 +1128,8 @@ QString EditManager::getTrackInputName(te::AudioTrack* track) const
     for (auto* instance : devices) {
         auto type = instance->getInputDevice().getDeviceType();
         if (type == te::InputDevice::waveDevice
-            || type == te::InputDevice::physicalMidiDevice)
+            || type == te::InputDevice::physicalMidiDevice
+            || type == te::InputDevice::virtualMidiDevice)
             return QString::fromStdString(
                 instance->getInputDevice().getName().toStdString());
     }
@@ -1130,7 +1146,8 @@ void EditManager::setTrackRecordEnabled(te::AudioTrack& track, bool enabled)
     for (auto* instance : devices) {
         auto type = instance->getInputDevice().getDeviceType();
         if (type == te::InputDevice::waveDevice
-            || type == te::InputDevice::physicalMidiDevice) {
+            || type == te::InputDevice::physicalMidiDevice
+            || type == te::InputDevice::virtualMidiDevice) {
             instance->setRecordingEnabled(track.itemID, enabled);
             break;
         }
@@ -1147,7 +1164,8 @@ bool EditManager::isTrackRecordEnabled(te::AudioTrack* track) const
     for (auto* instance : devices) {
         auto type = instance->getInputDevice().getDeviceType();
         if (type == te::InputDevice::waveDevice
-            || type == te::InputDevice::physicalMidiDevice)
+            || type == te::InputDevice::physicalMidiDevice
+            || type == te::InputDevice::virtualMidiDevice)
             return instance->isRecordingEnabled(track->itemID);
     }
     return false;

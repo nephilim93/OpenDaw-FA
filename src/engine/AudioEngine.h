@@ -7,6 +7,8 @@ namespace te = tracktion::engine;
 
 namespace OpenDaw {
 
+class VirtualMidiPorts;
+
 class AudioEngine : private juce::ChangeListener {
 public:
     AudioEngine();
@@ -30,11 +32,15 @@ public:
     // user never chose).
     void applyMidiDeviceSettings();
 
+    // OpenDaw's own "OpenDaw In" / "OpenDaw Out" ports (macOS, Linux).
+    VirtualMidiPorts& virtualMidiPorts() { return *virtualMidi_; }
+
 private:
     // Re-applies MIDI settings when devices appear (e.g. a controller plugged in).
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
 
     std::unique_ptr<te::Engine> engine_;
+    std::unique_ptr<VirtualMidiPorts> virtualMidi_;
 };
 
 } // namespace OpenDaw

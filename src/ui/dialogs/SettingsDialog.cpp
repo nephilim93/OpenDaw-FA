@@ -6,6 +6,7 @@
 #include "engine/EditManager.h"
 #include "engine/PluginScanner.h"
 #include "engine/drums/DrumMachinePlugin.h"
+#include "engine/midiports/VirtualMidiPorts.h"
 #include "ui/drums/DrumsViewLink.h"
 #include "utils/AppPaths.h"
 #include <QCheckBox>
@@ -150,6 +151,7 @@ QWidget* SettingsDialog::createMidiPage()
     inputs->setAccessibleName("MIDI input devices");
     for (int i = 0; i < dm.getNumMidiInDevices(); ++i) {
         if (auto dev = dm.getMidiInDevice(i)) {
+            if (VirtualMidiPorts::isOwnPortSeenAsDevice(dev->getName(), true)) continue;
             auto* item = new QListWidgetItem(toQ(dev->getName()), inputs);
             item->setCheckState(dev->isEnabled() ? Qt::Checked : Qt::Unchecked);
         }
@@ -168,6 +170,7 @@ QWidget* SettingsDialog::createMidiPage()
     outputs->setAccessibleName("MIDI output devices");
     for (int i = 0; i < dm.getNumMidiOutDevices(); ++i) {
         if (auto* dev = dm.getMidiOutDevice(i)) {
+            if (VirtualMidiPorts::isOwnPortSeenAsDevice(dev->getName(), false)) continue;
             auto* item = new QListWidgetItem(toQ(dev->getName()), outputs);
             item->setCheckState(dev->isEnabled() ? Qt::Checked : Qt::Unchecked);
         }
@@ -176,6 +179,31 @@ QWidget* SettingsDialog::createMidiPage()
         outputs->addItem("No MIDI outputs found");
     outputsLayout->addWidget(outputs);
     layout->addWidget(outputsGroup);
+
+    // OpenDaw's own ports, for apps on this computer (VCV Rack, midimux, ...).
+    auto* virtualGroup = new QGroupBox("Virtual Ports", page);
+    auto* virtualLayout = new QVBoxLayout(virtualGroup);
+    if (VirtualMidiPorts::supported()) {
+        auto* publish = new QCheckBox("Publish \"OpenDaw In\" and \"OpenDaw Out\" for other apps", virtualGroup);
+        publish->setAccessibleName("Virtual MIDI ports");
+        publish->setChecked(audio_.virtualMidiPorts().isEnabled());
+        connect(publish, &QCheckBox::toggled, this, [this](bool on) {
+            QSettings().setValue(VirtualMidiPorts::kEnabledKey, on);
+            audio_.virtualMidiPorts().setEnabled(on);
+        });
+        virtualLayout->addWidget(publish);
+        virtualLayout->addWidget(makeNote(
+            "Other apps send to \"OpenDaw In\": choose it as a MIDI track's input. To play another "
+            "app from OpenDaw, give a track the MIDI Out instrument and choose \"OpenDaw Out\" "
+            "as the input in that app.", virtualGroup));
+    } else {
+        virtualLayout->addWidget(makeNote(
+            "Windows has no virtual MIDI ports for apps. Install loopMIDI (free, from "
+            "tobias-erichsen.de) and create a port: it appears here like any device. Choose it as a "
+            "track's input to receive from another app, or as a MIDI Out track's destination to "
+            "send to one.", virtualGroup));
+    }
+    layout->addWidget(virtualGroup);
 
     // Inputs are stored as the ones switched off (so new devices start on);
     // outputs as the ones switched on.

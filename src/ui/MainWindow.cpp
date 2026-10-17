@@ -9,6 +9,8 @@
 #include "ui/drums/DrumsView.h"
 #include "ui/drums/DrumsViewLink.h"
 #include "ui/dialogs/ExportDialog.h"
+#include "ui/dialogs/MidiOutDialog.h"
+#include "engine/midiports/MidiOutPlugin.h"
 #include "ui/dialogs/SettingsDialog.h"
 #include "ui/video/VideoPlayerWidget.h"
 #include "ui/SplashScreen.h"
@@ -1354,6 +1356,10 @@ void MainWindow::onInstrumentSelectRequested(te::AudioTrack* track)
     });
     menu.addAction("Drum Machine (OpenDaw)", this, [this, track]() {
         editMgr_.setTrackDrumMachine(*track);
+    });
+    menu.addAction("MIDI Out (play another app or device)", this, [this, track]() {
+        if (auto* out = dynamic_cast<MidiOutPlugin*>(editMgr_.setTrackMidiOut(*track)))
+            MidiOutDialog::showFor(*out, this);
     });
     menu.addSeparator();
     menu.addAction("VST Instrument...", this, [this, track]() {

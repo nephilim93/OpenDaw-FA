@@ -1,6 +1,8 @@
 ﻿#include "AudioEngine.h"
 #include "midifx/VelocityFxPlugin.h"
 #include "drums/DrumMachinePlugin.h"
+#include "midiports/MidiOutPlugin.h"
+#include "midiports/VirtualMidiPorts.h"
 #include "modular/ModularSynthPlugin.h"
 #include <QSettings>
 
@@ -56,13 +58,19 @@ AudioEngine::AudioEngine()
     engine_->getPluginManager().createBuiltInType<VelocityFxPlugin>();
     engine_->getPluginManager().createBuiltInType<ModularSynthPlugin>();
     engine_->getPluginManager().createBuiltInType<DrumMachinePlugin>();
+    engine_->getPluginManager().createBuiltInType<MidiOutPlugin>();
 
     engine_->getDeviceManager().addChangeListener(this);
+
+    // Before any edit loads, so MIDI Out tracks find it; the ports are
+    // published once the device manager runs (setDefaultAudioDevice).
+    virtualMidi_ = std::make_unique<VirtualMidiPorts>(*engine_);
 }
 
 AudioEngine::~AudioEngine()
 {
     engine_->getDeviceManager().removeChangeListener(this);
+    virtualMidi_.reset();
 }
 
 void AudioEngine::changeListenerCallback(juce::ChangeBroadcaster*)
@@ -79,6 +87,7 @@ void AudioEngine::setDefaultAudioDevice()
 {
     auto& dm = engine_->getDeviceManager();
     dm.initialise(2, 2);
+    virtualMidi_->setEnabled(VirtualMidiPorts::enabledInSettings());
 
     // DeviceManager creates WaveInputDevice/WaveOutputDevice objects
     // asynchronously via triggerAsyncUpdate(). Pump the JUCE message
@@ -176,7 +185,7 @@ juce::StringArray AudioEngine::getAvailableMidiInputDevices() const
     auto& dm = engine_->getDeviceManager();
     for (int i = 0; i < dm.getNumMidiInDevices(); ++i) {
         auto dev = dm.getMidiInDevice(i);
-        if (dev)
+        if (dev && !VirtualMidiPorts::isOwnPortSeenAsDevice(dev->getName(), true))
             result.add(dev->getName());
     }
     return result;
@@ -187,7 +196,7 @@ juce::StringArray AudioEngine::getAvailableMidiOutputDevices() const
     juce::StringArray result;
     auto& dm = engine_->getDeviceManager();
     for (int i = 0; i < dm.getNumMidiOutDevices(); ++i)
-        if (auto dev = dm.getMidiOutDevice(i))
+        if (auto dev = dm.getMidiOutDevice(i); dev && !VirtualMidiPorts::isOwnPortSeenAsDevice(dev->getName(), false))
             result.add(dev->getName());
     return result;
 }
@@ -202,7 +211,9 @@ void AudioEngine::applyMidiDeviceSettings()
         if (auto dev = dm.getMidiInDevice(i)) {
             const QString name = QString::fromUtf8(dev->getName().toRawUTF8());
             // Only write when different, so applying never re-triggers a rescan.
-            const bool enable = !disabledInputs.contains(name);
+            // OpenDaw's own "Out" seen as an input stays off: no MIDI loops.
+            const bool enable = !disabledInputs.contains(name)
+                                && !VirtualMidiPorts::isOwnPortSeenAsDevice(dev->getName(), true);
             if (dev->isEnabled() != enable)
                 dev->setEnabled(enable);
             // Tracktion's default ("automatic") only plays live MIDI on
@@ -212,13 +223,20 @@ void AudioEngine::applyMidiDeviceSettings()
         }
     }
 
+    // OpenDaw's own "In" seen as an output stays off, whatever was chosen.
+    for (int i = 0; i < dm.getNumMidiOutDevices(); ++i)
+        if (auto* dev = dm.getMidiOutDevice(i); dev && dev->isEnabled()
+                                                && VirtualMidiPorts::isOwnPortSeenAsDevice(dev->getName(), false))
+            dev->setEnabled(false);
+
     if (!settings.contains("midi/enabledOutputs"))
         return;
     const QStringList enabledOutputs = settings.value("midi/enabledOutputs").toStringList();
     for (int i = 0; i < dm.getNumMidiOutDevices(); ++i) {
         if (auto* dev = dm.getMidiOutDevice(i)) {
             const QString name = QString::fromUtf8(dev->getName().toRawUTF8());
-            const bool enable = enabledOutputs.contains(name);
+            const bool enable = enabledOutputs.contains(name)
+                                && !VirtualMidiPorts::isOwnPortSeenAsDevice(dev->getName(), false);
             if (dev->isEnabled() != enable)
                 dev->setEnabled(enable);
         }

@@ -3,6 +3,8 @@
 #include "ui/modular/ModularEditorLink.h"
 #include "engine/modular/ModularSynthPlugin.h"
 #include "engine/drums/DrumMachinePlugin.h"
+#include "engine/midiports/MidiOutPlugin.h"
+#include "ui/dialogs/MidiOutDialog.h"
 #include "ui/drums/DrumsViewLink.h"
 #include "utils/IconFont.h"
 #include "utils/ThemeManager.h"
@@ -130,6 +132,8 @@ TrackHeaderWidget::TrackHeaderWidget(te::AudioTrack* track, EditManager* editMgr
                 ModularEditorLink::instance().requestOpen(track_);
             } else if (dynamic_cast<DrumMachinePlugin*>(instr)) {
                 DrumsViewLink::instance().requestOpen(track_);
+            } else if (auto* out = dynamic_cast<MidiOutPlugin*>(instr)) {
+                MidiOutDialog::showFor(*out, this);
             } else {
                 emit instrumentSelectRequested(track_);
             }
@@ -154,6 +158,10 @@ TrackHeaderWidget::TrackHeaderWidget(te::AudioTrack* track, EditManager* editMgr
                     } else if (dynamic_cast<DrumMachinePlugin*>(instr)) {
                         menu.addAction("Open Drums", [this]() {
                             DrumsViewLink::instance().requestOpen(track_);
+                        });
+                    } else if (auto* out = dynamic_cast<MidiOutPlugin*>(instr)) {
+                        menu.addAction(QString::fromUtf8("MIDI Out Settings…"), [this, out]() {
+                            MidiOutDialog::showFor(*out, this);
                         });
                     }
                     menu.exec(instrumentBtn_->mapToGlobal(pos));

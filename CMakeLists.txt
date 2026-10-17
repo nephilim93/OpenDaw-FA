@@ -145,6 +145,7 @@ set(OpenDaw_SOURCES
     src/ui/dialogs/RecoveryDialog.h      src/ui/dialogs/RecoveryDialog.cpp
     src/ui/dialogs/AudioSettingsPage.h src/ui/dialogs/AudioSettingsPage.cpp
     src/ui/dialogs/SettingsDialog.h src/ui/dialogs/SettingsDialog.cpp
+    src/ui/dialogs/MidiOutDialog.h src/ui/dialogs/MidiOutDialog.cpp
     src/utils/AppPaths.h
     src/ui/effects/EffectChainWidget.h   src/ui/effects/EffectChainWidget.cpp
     src/ui/effects/DelayEffectWidget.h   src/ui/effects/DelayEffectWidget.cpp
@@ -196,6 +197,8 @@ set(OpenDaw_SOURCES
     src/drums/KitPresets.h         src/drums/KitPresets.cpp
     src/drums/KitFromFolder.h      src/drums/KitFromFolder.cpp
     src/engine/drums/DrumMachinePlugin.h src/engine/drums/DrumMachinePlugin.cpp
+    src/engine/midiports/VirtualMidiPorts.h src/engine/midiports/VirtualMidiPorts.cpp
+    src/engine/midiports/MidiOutPlugin.h src/engine/midiports/MidiOutPlugin.cpp
     src/ai/AiTypes.h
     src/ai/AiAudioAnalysis.h      src/ai/AiAudioAnalysis.cpp
     src/ai/AiToolDefs.h            src/ai/AiToolDefs.cpp
@@ -380,4 +383,6 @@ if(OPENDAW_BUILD_EDITOR_TESTS)
                         tests/modular_editor/ModularEditorTest.cpp)
     opendaw_add_ui_test(opendaw_drums_ui_test "OpenDawDrumsUiTest" drums.ui
                         tests/drums_ui/DrumsViewTest.cpp)
+    opendaw_add_ui_test(opendaw_midi_ports_test "OpenDawMidiPortsTest" midi.ports
+                        tests/midiports/MidiPortsTest.cpp)
 endif()
