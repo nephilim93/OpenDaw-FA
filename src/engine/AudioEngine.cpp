@@ -141,6 +141,61 @@ void AudioEngine::restoreSavedAudioSettings()
         setup.bufferSize = buf;
 
     adm.setAudioDeviceSetup(setup, true);
+    applyChannelSetting();
+}
+
+bool AudioEngine::allChannelsInSettings()
+{
+    return QSettings().value("audio/allChannels", false).toBool();
+}
+
+void AudioEngine::setAllChannels(bool on)
+{
+    QSettings().setValue("audio/allChannels", on);
+    applyChannelSetting();
+}
+
+void AudioEngine::applyChannelSetting()
+{
+    auto& adm = engine_->getDeviceManager().deviceManager;
+    auto* device = adm.getCurrentAudioDevice();
+    if (!device) return;
+
+    juce::AudioDeviceManager::AudioDeviceSetup setup;
+    adm.getAudioDeviceSetup(setup);
+    const auto before = setup;
+    const bool all = allChannelsInSettings();
+    const int outs = device->getOutputChannelNames().size();
+    const int ins = device->getInputChannelNames().size();
+    const bool hasInput = setup.inputDeviceName.isNotEmpty();
+
+    if (all) {
+        setup.useDefaultOutputChannels = false;
+        setup.outputChannels.clear();
+        setup.outputChannels.setRange(0, outs, true);
+        if (hasInput) {
+            setup.useDefaultInputChannels = false;
+            setup.inputChannels.clear();
+            setup.inputChannels.setRange(0, ins, true);
+        }
+    } else {
+        // The first pair, as a fresh device opens.
+        setup.useDefaultOutputChannels = false;
+        setup.outputChannels.clear();
+        setup.outputChannels.setRange(0, std::min(2, outs), true);
+        if (hasInput) {
+            setup.useDefaultInputChannels = false;
+            setup.inputChannels.clear();
+            setup.inputChannels.setRange(0, std::min(2, ins), true);
+        }
+    }
+    if (setup.outputChannels == before.outputChannels && setup.inputChannels == before.inputChannels
+        && setup.useDefaultOutputChannels == before.useDefaultOutputChannels
+        && setup.useDefaultInputChannels == before.useDefaultInputChannels)
+        return;
+    const auto error = adm.setAudioDeviceSetup(setup, true);
+    if (error.isNotEmpty())
+        juce::Logger::writeToLog("Audio: could not open the device's channels: " + error);
 }
 
 void AudioEngine::saveAudioSettings()

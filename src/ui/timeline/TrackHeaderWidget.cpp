@@ -845,10 +845,20 @@ void TrackHeaderWidget::populateOutputCombo()
         QString id = QString::number(bus->itemID.getRawID());
         outputCombo_->addItem(name, id);
     }
+    // The device's other outputs (Settings > Audio > Use every channel).
+    for (const auto& device : editMgr_->getAvailableDeviceOutputs())
+        outputCombo_->addItem(device, QString("__device__:") + device);
 
     if (!track_ || !editMgr_) return;
     auto* dest = editMgr_->getTrackOutputDestination(track_);
-    if (!dest) {
+    if (const QString device = editMgr_->getTrackOutputDevice(track_); !device.isEmpty()) {
+        int idx = outputCombo_->findData(QString("__device__:") + device);
+        if (idx < 0) {   // routed to a device output that's closed now
+            outputCombo_->addItem(device + " (not open)", QString("__device__:") + device);
+            idx = outputCombo_->count() - 1;
+        }
+        outputCombo_->setCurrentIndex(idx);
+    } else if (!dest) {
         outputCombo_->setCurrentIndex(0);
     } else {
         QString destId = QString::number(dest->itemID.getRawID());
@@ -864,6 +874,8 @@ void TrackHeaderWidget::onOutputComboChanged(int index)
     QString destData = outputCombo_->itemData(index).toString();
     if (destData == "__master__") {
         editMgr_->setTrackOutputToMaster(*track_);
+    } else if (destData.startsWith("__device__:")) {
+        editMgr_->setTrackOutputToDevice(*track_, destData.mid(int(qstrlen("__device__:"))));
     } else {
         uint64_t rawId = destData.toULongLong();
         for (auto* bus : editMgr_->getBusTracks()) {

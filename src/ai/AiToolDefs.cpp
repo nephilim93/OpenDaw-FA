@@ -212,7 +212,9 @@ QJsonArray AiToolDefs::allTools()
         destProp["oneOf"] = oneOf;
         props["destination"] = destProp;
         tools.append(makeTool("set_track_output",
-            "Route a track's output to the master bus or to another track/bus.",
+            "Route a track's output to the master bus, another track/bus, or one of the audio "
+            "device's other outputs by name (e.g. \"Output 3 + 4\": a loopback device's or JACK "
+            "channels that feed another app; the error lists the available ones).",
             props, {"track", "destination"}));
     }
 

@@ -1227,6 +1227,44 @@ void EditManager::clearTrackOutput(te::AudioTrack& track)
     markDirtyAndNotify();
 }
 
+QStringList EditManager::getAvailableDeviceOutputs() const
+{
+    // The audio device's other output pairs (the first one is the master's).
+    QStringList names;
+    auto& dm = audioEngine_.engine().getDeviceManager();
+    auto* defaultOut = dm.getDefaultWaveOutDevice();
+    for (int i = 0; i < dm.getNumWaveOutDevices(); ++i)
+        if (auto* dev = dm.getWaveOutDevice(i); dev && dev->isEnabled() && dev != defaultOut)
+            names << QString::fromUtf8(dev->getName().toRawUTF8());
+    return names;
+}
+
+bool EditManager::setTrackOutputToDevice(te::AudioTrack& track, const QString& deviceName)
+{
+    if (!edit_) return false;
+    auto& dm = audioEngine_.engine().getDeviceManager();
+    for (int i = 0; i < dm.getNumWaveOutDevices(); ++i) {
+        auto* dev = dm.getWaveOutDevice(i);
+        if (!dev || QString::fromUtf8(dev->getName().toRawUTF8()) != deviceName) continue;
+        track.state.setProperty(juce::Identifier("outputDisconnected"), false, &edit_->getUndoManager());
+        track.getOutput().setOutputToDeviceID(dev->getDeviceID());
+        emit routingChanged();
+        markDirtyAndNotify();
+        return true;
+    }
+    return false;
+}
+
+QString EditManager::getTrackOutputDevice(te::AudioTrack* track) const
+{
+    if (!track || track->getOutput().getDestinationTrack() || track->getOutput().usesDefaultAudioOut())
+        return {};
+    auto* dev = dynamic_cast<te::WaveOutputDevice*>(track->getOutput().getOutputDevice(false));
+    auto& dm = audioEngine_.engine().getDeviceManager();
+    if (!dev || dev == dm.getDefaultWaveOutDevice()) return {};
+    return QString::fromUtf8(dev->getName().toRawUTF8());
+}
+
 te::AudioTrack* EditManager::getTrackOutputDestination(te::AudioTrack* track) const
 {
     if (!track) return nullptr;

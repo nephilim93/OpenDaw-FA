@@ -28,6 +28,7 @@
 #include <QScrollArea>
 #include <QSettings>
 #include <QSignalBlocker>
+#include <QTimer>
 #include <QUrl>
 #include <QVBoxLayout>
 #include <memory>
@@ -100,7 +101,13 @@ SettingsDialog::SettingsDialog(AudioEngine& audio, EditManager& editMgr,
     body->addWidget(pages_, 1);
 
     auto* audioPage = new AudioSettingsPage(audio_, this);
-    audioPage->setDeviceChangedCallback([this]() { editMgr_.enableAllWaveInputDevices(); });
+    audioPage->setDeviceChangedCallback([this]() {
+        editMgr_.enableAllWaveInputDevices();
+        // Tracktion rebuilds its output pairs a moment later: refresh the
+        // output menus then.
+        auto* editMgr = &editMgr_;   // the dialog may be closed by then
+        QTimer::singleShot(400, editMgr, [editMgr]() { emit editMgr->routingChanged(); });
+    });
     addPage("Audio", audioPage);
     addPage("MIDI", createMidiPage());
     addPage("AI Assistant", createAiPage());

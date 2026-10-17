@@ -4,6 +4,7 @@
 #include <QWidget>
 #include <QComboBox>
 #include <QLabel>
+#include <QCheckBox>
 #include <functional>
 
 namespace OpenDaw {
@@ -37,6 +38,7 @@ private:
     QComboBox* sampleRateCombo_  = nullptr;
     QComboBox* bufferSizeCombo_  = nullptr;
     QLabel*    latencyLabel_     = nullptr;
+    QCheckBox* allChannels_      = nullptr;
     QLabel*    driverNote_       = nullptr;
     QLabel*    errorLabel_       = nullptr;
 };

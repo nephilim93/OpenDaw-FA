@@ -104,6 +104,12 @@ public:
     bool wouldCreateCycle(te::AudioTrack* src, te::AudioTrack* dest) const;
     void setTrackOutputToMaster(te::AudioTrack& track);
     void setTrackOutputToTrack(te::AudioTrack& src, te::AudioTrack& dest);
+    // The audio device's other output pairs ("Output 3 + 4", a loopback
+    // device's channels, JACK ports...): a track sent there skips the master.
+    QStringList getAvailableDeviceOutputs() const;
+    bool setTrackOutputToDevice(te::AudioTrack& track, const QString& deviceName);
+    // The device output a track sends to, or empty (master, a bus, none).
+    QString getTrackOutputDevice(te::AudioTrack* track) const;
     void clearTrackOutput(te::AudioTrack& track);
     te::AudioTrack* getTrackOutputDestination(te::AudioTrack* track) const;
     bool isTrackOutputDisconnected(te::AudioTrack* track) const;

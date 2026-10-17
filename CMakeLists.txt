@@ -278,6 +278,22 @@ target_compile_definitions(OpenDaw PRIVATE
     DONT_SET_USING_JUCE_NAMESPACE=1
     TRACKTION_ENABLE_TIMESTRETCH_SOUNDTOUCH=1)
 
+# JACK on Linux: the JACK device type gives OpenDaw real audio ports that
+# other apps (VCV Rack, ...) connect to, with PipeWire too. JUCE loads
+# libjack at run time, so only the headers are needed (libjack-jackd2-dev).
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    option(OPENDAW_WITH_JACK "Offer the JACK audio device type" ON)
+    if(OPENDAW_WITH_JACK)
+        find_path(OPENDAW_JACK_INCLUDE_DIR jack/jack.h)
+        if(OPENDAW_JACK_INCLUDE_DIR)
+            target_compile_definitions(OpenDaw PRIVATE JUCE_JACK=1)
+            message(STATUS "OpenDaw: JACK audio enabled")
+        else()
+            message(WARNING "OpenDaw: jack/jack.h not found (install libjack-jackd2-dev); building without JACK")
+        endif()
+    endif()
+endif()
+
 target_link_libraries(OpenDaw PRIVATE
     Qt6::Widgets
     Qt6::Network

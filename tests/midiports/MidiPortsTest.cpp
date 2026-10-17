@@ -2,8 +2,10 @@
 // CoreMIDI / ALSA ports: this test plays the other app, sending to
 // "OpenDaw In" and listening on "OpenDaw Out".
 #include "app/JuceQtBridge.h"
+#include "ai/AiToolExecutor.h"
 #include "engine/AudioEngine.h"
 #include "engine/EditManager.h"
+#include "engine/PluginScanner.h"
 #include "engine/midiports/MidiClockPlugin.h"
 #include "engine/midiports/MidiOutPlugin.h"
 #include "engine/midiports/VirtualMidiPorts.h"
@@ -14,6 +16,7 @@
 #endif
 #include <QComboBox>
 #include <QElapsedTimer>
+#include <QJsonObject>
 #include <QSettings>
 #include <cstdio>
 #include <mutex>
@@ -366,6 +369,40 @@ int main(int argc, char** argv)
             ports.setClockEnabled(true);
             EXPECT(QSettings().value(VirtualMidiPorts::kClockKey).toBool());
         }
+    }
+
+    // ── Audio: every channel of the device, and device outputs for tracks ──
+    std::printf("audio device outputs\n");
+    {
+        auto& adm = engine.deviceManager().deviceManager;
+        auto* device = adm.getCurrentAudioDevice();
+        EXPECT(device != nullptr);
+        if (device) {
+            const int outs = device->getOutputChannelNames().size();
+            engine.setAllChannels(true);
+            settle(200);
+            EXPECT(AudioEngine::allChannelsInSettings());
+            device = adm.getCurrentAudioDevice();
+            EXPECT(device && device->getActiveOutputChannels().countNumberOfSetBits() == outs);
+            engine.setAllChannels(false);
+            settle(200);
+            device = adm.getCurrentAudioDevice();
+            EXPECT(device && device->getActiveOutputChannels().countNumberOfSetBits() == std::min(2, outs));
+            std::printf("  device has %d outputs; %d other output pair(s) offered\n", outs,
+                        int(editMgr.getAvailableDeviceOutputs().size()));
+            // The first pair is the master's, never offered as a device output.
+            EXPECT(editMgr.getAvailableDeviceOutputs().size() == (outs <= 2 ? 0 : (outs - 1) / 2));
+        }
+        auto* track = editMgr.addAudioTrack();
+        EXPECT(!editMgr.setTrackOutputToDevice(*track, "No Such Output"));
+        EXPECT(editMgr.getTrackOutputDevice(track).isEmpty());   // still the master
+        PluginScanner scanner(engine);
+        AiToolExecutor tools(&editMgr, &engine, &scanner);
+        const auto r = tools.execute(AiToolCall{ "o1", "set_track_output",
+            QJsonObject{ { "track", QString::fromUtf8(track->getName().toRawUTF8()) }, { "destination", "Output 3 + 4" } } });
+        EXPECT(r.isError);
+        EXPECT(editMgr.getAvailableDeviceOutputs().isEmpty() ? r.content.contains("Use every channel")
+                                                             : r.content.contains("Device outputs"));
     }
 
     // ── Switching the ports off withdraws them ──

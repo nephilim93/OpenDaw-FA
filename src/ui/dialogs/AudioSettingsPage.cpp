@@ -1,5 +1,6 @@
 #include "AudioSettingsPage.h"
 #include <QVBoxLayout>
+#include <QCheckBox>
 #include <QFormLayout>
 #include <QGroupBox>
 #include <QSignalBlocker>
@@ -48,7 +49,42 @@ AudioSettingsPage::AudioSettingsPage(AudioEngine& engine, QWidget* parent)
     latencyLabel_->setAccessibleName("Latency");
     form->addRow("Latency:", latencyLabel_);
 
+    allChannels_ = new QCheckBox("Use every channel of the device", this);
+    allChannels_->setAccessibleName("Use every channel");
+    allChannels_->setToolTip("Open all inputs and outputs, not just the first pair: tracks can then "
+                             "send to and record from the others");
+    allChannels_->setChecked(AudioEngine::allChannelsInSettings());
+    form->addRow("Channels:", allChannels_);
+    connect(allChannels_, &QCheckBox::toggled, this, [this](bool on) {
+        engine_.setAllChannels(on);
+        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        engine_.saveAudioSettings();
+        if (onDeviceChanged_) onDeviceChanged_();
+        populateDevices();
+    });
+
     mainLayout->addWidget(group);
+
+    // Audio between OpenDaw and other apps on this computer (VCV Rack, ...).
+    auto* appsNote = new QLabel(this);
+    appsNote->setAccessibleName("Connecting other apps");
+    appsNote->setWordWrap(true);
+    appsNote->setStyleSheet("font-size: 10px; color: gray; padding: 4px 8px;");
+#if JUCE_LINUX
+    appsNote->setText("Other apps: choose the JACK driver (PipeWire provides it too). OpenDaw's channels "
+                      "then appear as ports that apps like VCV Rack connect to. Turn on \"Use every "
+                      "channel\" and send tracks to Output 3 + 4 and up.");
+#elif JUCE_MAC
+    appsNote->setText("Other apps: install a loopback driver such as BlackHole (free). In Audio MIDI Setup, "
+                      "make an Aggregate Device of your speakers and BlackHole, choose it here, and turn "
+                      "on \"Use every channel\". Send a track to BlackHole's outputs to feed another app "
+                      "(VCV Rack's Audio module), and record its return on BlackHole's inputs.");
+#else
+    appsNote->setText("Other apps: install a loopback driver such as VB-CABLE, or use an ASIO driver with "
+                      "loopback. Turn on \"Use every channel\" and send a track to the cable's outputs to "
+                      "feed another app, and record its return on the cable's inputs.");
+#endif
+    mainLayout->addWidget(appsNote);
 
     errorLabel_ = new QLabel(this);
     errorLabel_->setAccessibleName("Audio device error");
@@ -70,6 +106,7 @@ AudioSettingsPage::AudioSettingsPage(AudioEngine& engine, QWidget* parent)
         if (idx < 0 || idx >= types.size()) return;
         adm.setCurrentAudioDeviceType(types[idx]->getTypeName(), true);
         juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+        engine_.applyChannelSetting();
         populateDevices();
         updateDriverNote();
         engine_.saveAudioSettings();
@@ -114,8 +151,10 @@ void AudioSettingsPage::applySetup(
     adm.getAudioDeviceSetup(setup);
     change(setup);
 
-    const auto error = adm.setAudioDeviceSetup(setup, true);
+    auto error = adm.setAudioDeviceSetup(setup, true);
     juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
+    // A new device opens its first pair: keep the channel choice.
+    if (error.isEmpty()) engine_.applyChannelSetting();
 
     if (error.isNotEmpty()) {
         errorLabel_->setText("Could not apply the audio settings: " + toQ(error));

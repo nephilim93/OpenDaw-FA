@@ -22,6 +22,13 @@ public:
     void setDefaultAudioDevice();
     void restoreSavedAudioSettings();
     void saveAudioSettings();
+    // "Use every channel" (Settings > Audio): opens all of the device's
+    // inputs and outputs instead of the first pair, so tracks can send to
+    // and record from the other channels, e.g. a loopback device's that other
+    // apps read and write. Re-applied after every device change.
+    static bool allChannelsInSettings();
+    void setAllChannels(bool on);
+    void applyChannelSetting();
     juce::StringArray getAvailableInputDevices() const;
     juce::StringArray getAvailableOutputDevices() const;
 

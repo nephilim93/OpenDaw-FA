@@ -490,9 +490,20 @@ void AiToolExecutor::registerHandlers()
         QJsonValue dest = input["destination"];
         if (dest.isString() && dest.toString().compare("master", Qt::CaseInsensitive) == 0) {
             editMgr_->setTrackOutputToMaster(*track);
+        } else if (dest.isString() && editMgr_->getAvailableDeviceOutputs().contains(dest.toString(), Qt::CaseInsensitive)) {
+            QString name = dest.toString();
+            for (const auto& d : editMgr_->getAvailableDeviceOutputs())
+                if (d.compare(name, Qt::CaseInsensitive) == 0) name = d;
+            editMgr_->setTrackOutputToDevice(*track, name);
         } else {
             auto* destTrack = resolveTrack(dest);
-            if (!destTrack) return err(id, "Destination track not found.");
+            if (!destTrack) {
+                const auto devices = editMgr_->getAvailableDeviceOutputs();
+                return err(id, devices.isEmpty()
+                    ? QString("Destination track not found. (No other device outputs are open: the user can turn on "
+                              "Settings > Audio > Use every channel.)")
+                    : QString("Destination track not found. Device outputs: %1.").arg(devices.join(", ")));
+            }
             editMgr_->setTrackOutputToTrack(*track, *destTrack);
         }
         emitRoutingChanged();
