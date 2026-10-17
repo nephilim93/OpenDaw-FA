@@ -1,4 +1,5 @@
 ﻿#include "RoutingView.h"
+#include "engine/midiports/MidiClockPlugin.h"
 #include "utils/ThemeManager.h"
 #include <QVBoxLayout>
 #include <QMouseEvent>
@@ -531,6 +532,7 @@ QStringList RoutingView::getMasterEffectNames() const
     for (auto* p : editMgr_->edit()->getMasterPluginList().getPlugins()) {
         if (dynamic_cast<te::VolumeAndPanPlugin*>(p)) continue;
         if (dynamic_cast<te::LevelMeterPlugin*>(p)) continue;
+        if (dynamic_cast<MidiClockPlugin*>(p)) continue;
         names.append(QString::fromStdString(p->getName().toStdString()));
     }
     return names;

@@ -199,6 +199,7 @@ set(OpenDaw_SOURCES
     src/engine/drums/DrumMachinePlugin.h src/engine/drums/DrumMachinePlugin.cpp
     src/engine/midiports/VirtualMidiPorts.h src/engine/midiports/VirtualMidiPorts.cpp
     src/engine/midiports/MidiOutPlugin.h src/engine/midiports/MidiOutPlugin.cpp
+    src/engine/midiports/MidiClockPlugin.h src/engine/midiports/MidiClockPlugin.cpp
     src/ai/AiTypes.h
     src/ai/AiAudioAnalysis.h      src/ai/AiAudioAnalysis.cpp
     src/ai/AiToolDefs.h            src/ai/AiToolDefs.cpp

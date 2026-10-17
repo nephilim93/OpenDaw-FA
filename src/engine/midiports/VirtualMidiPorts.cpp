@@ -35,6 +35,7 @@ VirtualMidiPorts::VirtualMidiPorts(te::Engine& engine)
     : juce::Thread("OpenDaw MIDI out"), engine_(engine)
 {
     engine_.getDeviceManager().addChangeListener(this);
+    clock_ = QSettings().value(kClockKey, true).toBool();
     startThread(juce::Thread::Priority::high);
     gInstance = this;
 }
@@ -111,6 +112,12 @@ void VirtualMidiPorts::setEnabled(bool enabled)
                 dm.deleteVirtualMidiDevice(*v);
                 break;
             }
+}
+
+void VirtualMidiPorts::setClockEnabled(bool on)
+{
+    QSettings().setValue(kClockKey, on);
+    clock_ = on;
 }
 
 bool VirtualMidiPorts::isOwnPortSeenAsDevice(const juce::String& deviceName, bool isInput)

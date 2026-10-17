@@ -4,6 +4,7 @@
 #include "app/JuceQtBridge.h"
 #include "engine/AudioEngine.h"
 #include "engine/EditManager.h"
+#include "engine/midiports/MidiClockPlugin.h"
 #include "engine/midiports/MidiOutPlugin.h"
 #include "engine/midiports/VirtualMidiPorts.h"
 #include "ui/dialogs/MidiOutDialog.h"
@@ -267,6 +268,104 @@ int main(int argc, char** argv)
         auto copy = editMgr.edit()->getPluginCache().createNewPlugin(out->state.createCopy());
         auto* restored = dynamic_cast<MidiOutPlugin*>(copy.get());
         EXPECT(restored && restored->destination() == VirtualMidiPorts::kVirtualDestination);
+    }
+
+    // ── MIDI clock and transport follow OpenDaw ──
+    std::printf("midi clock\n");
+    {
+        // The edit has one, hidden first on the master.
+        auto& master = editMgr.edit()->getMasterPluginList();
+        EXPECT(master.getPluginsOfType<MidiClockPlugin>().size() == 1);
+        EXPECT(dynamic_cast<MidiClockPlugin*>(master[0]) != nullptr);
+        editMgr.ensureMidiClock();
+        EXPECT(master.getPluginsOfType<MidiClockPlugin>().size() == 1);   // never twice
+
+        // Its own instance, outside the running graph, fed blocks in real time.
+        auto made = editMgr.edit()->getPluginCache().createNewPlugin(juce::String(MidiClockPlugin::xmlTypeName), {});
+        auto* clock = dynamic_cast<MidiClockPlugin*>(made.get());
+        EXPECT(clock != nullptr);
+        if (clock) {
+            clock->initialise({ tracktion::TimePosition(), 44100.0, 512 });
+            const double block = 512.0 / 44100.0;
+            auto play = [&](double from, double seconds, bool playing) {
+                for (double t = from; t < from + seconds - 1.0e-9; t += block) {
+                    juce::AudioBuffer<float> buffer(2, 512);
+                    buffer.clear();
+                    te::PluginRenderContext rc(&buffer, juce::AudioChannelSet::stereo(), 0, 512, nullptr, 0.0,
+                                               tracktion::TimeRange(tracktion::TimePosition::fromSeconds(t),
+                                                             tracktion::TimePosition::fromSeconds(t + block)),
+                                               playing, false, false, false);
+                    clock->applyToBuffer(rc);
+                    juce::Thread::sleep(int(block * 1000.0));
+                }
+            };
+            auto count = [](const std::vector<Listener::Got>& got, auto pred) {
+                int n = 0;
+                for (const auto& g : got) n += pred(g.message) ? 1 : 0;
+                return n;
+            };
+            auto isClock = [](const juce::MidiMessage& m) { return m.isMidiClock(); };
+
+            // Play one second from the top at 120 BPM: position 0, start, 48 ticks.
+            listener.clear();
+            play(0.0, 1.0, true);
+            settle(100);
+            auto got = listener.snapshot();
+            EXPECT(got.size() >= 2 && got[0].message.isSongPositionPointer()
+                   && got[0].message.getSongPositionPointerMidiBeat() == 0);
+            EXPECT(got.size() >= 2 && got[1].message.isMidiStart());
+            const int ticks = count(got, isClock);
+            std::printf("  %d clock ticks in 1 s at 120 BPM (48 expected)\n", ticks);
+            EXPECT(ticks >= 47 && ticks <= 49);
+            std::vector<double> times;
+            for (const auto& g : got) if (g.message.isMidiClock()) times.push_back(g.atMs);
+            if (times.size() > 10) {
+                const double mean = (times.back() - times.front()) / double(times.size() - 1);
+                std::printf("  tick spacing %.2f ms (20.83 expected)\n", mean);
+                EXPECT(mean > 18.0 && mean < 24.0);
+            }
+
+            // Stop sends stop; playing again after a jump sends position and continue.
+            listener.clear();
+            play(1.0, 0.05, false);
+            settle(50);
+            EXPECT(count(listener.snapshot(), [](const juce::MidiMessage& m) { return m.isMidiStop(); }) == 1);
+            EXPECT(count(listener.snapshot(), isClock) == 0);
+            listener.clear();
+            play(10.0, 0.6, true);   // 10 s = beat 20 = sixteenth 80
+            settle(100);
+            got = listener.snapshot();
+            EXPECT(!got.empty() && got[0].message.isSongPositionPointer()
+                   && got[0].message.getSongPositionPointerMidiBeat() == 80);
+            EXPECT(got.size() > 1 && got[1].message.isMidiContinue());
+
+            // A loop back sends the position again.
+            listener.clear();
+            play(2.0, 0.3, true);
+            settle(100);
+            got = listener.snapshot();
+            EXPECT(!got.empty() && got[0].message.isSongPositionPointer()
+                   && got[0].message.getSongPositionPointerMidiBeat() == 16);
+
+            // A short loop (less than the jump threshold) also resends it.
+            play(2.0, 0.1, true);
+            listener.clear();
+            play(2.0, 0.1, true);
+            settle(100);
+            got = listener.snapshot();
+            EXPECT(!got.empty() && got[0].message.isSongPositionPointer()
+                   && got[0].message.getSongPositionPointerMidiBeat() == 16);
+
+            // Switched off in Settings: nothing at all.
+            ports.setClockEnabled(false);
+            listener.clear();
+            play(3.0, 0.3, true);
+            play(3.3, 0.05, false);
+            settle(100);
+            EXPECT(listener.snapshot().empty());
+            ports.setClockEnabled(true);
+            EXPECT(QSettings().value(VirtualMidiPorts::kClockKey).toBool());
+        }
     }
 
     // ── Switching the ports off withdraws them ──

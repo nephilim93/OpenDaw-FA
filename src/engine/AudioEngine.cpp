@@ -1,6 +1,7 @@
 ﻿#include "AudioEngine.h"
 #include "midifx/VelocityFxPlugin.h"
 #include "drums/DrumMachinePlugin.h"
+#include "midiports/MidiClockPlugin.h"
 #include "midiports/MidiOutPlugin.h"
 #include "midiports/VirtualMidiPorts.h"
 #include "modular/ModularSynthPlugin.h"
@@ -59,6 +60,7 @@ AudioEngine::AudioEngine()
     engine_->getPluginManager().createBuiltInType<ModularSynthPlugin>();
     engine_->getPluginManager().createBuiltInType<DrumMachinePlugin>();
     engine_->getPluginManager().createBuiltInType<MidiOutPlugin>();
+    engine_->getPluginManager().createBuiltInType<MidiClockPlugin>();
 
     engine_->getDeviceManager().addChangeListener(this);
 

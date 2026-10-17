@@ -52,6 +52,7 @@ public:
     // A MIDI Out destination: the virtual port, or a system output's name.
     static constexpr const char* kVirtualDestination = "OpenDaw Out";
     static constexpr const char* kEnabledKey = "midi/virtualPorts";
+    static constexpr const char* kClockKey = "midi/virtualClock";
 
     explicit VirtualMidiPorts(te::Engine& engine);
     ~VirtualMidiPorts() override;
@@ -72,6 +73,11 @@ public:
     // is a source and "In" a destination to every app, including this one):
     // hidden from device lists and kept disabled, so MIDI never loops back.
     static bool isOwnPortSeenAsDevice(const juce::String& deviceName, bool isInput);
+
+    // MIDI clock and start/stop on "OpenDaw Out" (MidiClockPlugin); on by
+    // default, saved in the settings.
+    bool clockEnabled() const { return clock_.load(); }
+    void setClockEnabled(bool on);
 
     // Where MIDI Out tracks can send: the virtual port (when published), then
     // the system's outputs.
@@ -107,6 +113,7 @@ private:
     std::shared_ptr<te::MidiInputDevice> tracktionIn_;
     tracktion::MPESourceID sourceId_ = tracktion::createUniqueMPESourceID();
     std::atomic<int> received_{ 0 }, forwarded_{ 0 };
+    std::atomic<bool> clock_{ true };
 
     juce::CriticalSection lock_;   // queues_ and outputs_; never taken by the audio thread
     std::vector<MidiSendQueue*> queues_;

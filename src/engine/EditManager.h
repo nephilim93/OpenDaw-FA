@@ -77,6 +77,8 @@ public:
     te::Plugin* setTrackDrumMachine(te::AudioTrack& track);
     // The MIDI Out instrument: the track plays another app or device.
     te::Plugin* setTrackMidiOut(te::AudioTrack& track);
+    // The hidden MIDI clock on the master (added to every edit; idempotent).
+    void ensureMidiClock();
 
     // MIDI FX sit before the instrument and process the track's MIDI. VST
     // MIDI FX often report themselves as synths, so they carry a marker in

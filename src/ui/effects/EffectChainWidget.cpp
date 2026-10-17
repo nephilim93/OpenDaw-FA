@@ -1,4 +1,5 @@
 #include "EffectChainWidget.h"
+#include "engine/midiports/MidiClockPlugin.h"
 #include "DelayEffectWidget.h"
 #include "EffectSelectorDialog.h"
 #include "VstSelectorDialog.h"
@@ -352,6 +353,7 @@ void EffectChainWidget::rebuild()
     for (auto* plugin : plist->getPlugins()) {
         if (dynamic_cast<te::VolumeAndPanPlugin*>(plugin)) continue;
         if (dynamic_cast<te::LevelMeterPlugin*>(plugin)) continue;
+        if (dynamic_cast<MidiClockPlugin*>(plugin)) continue;
         if (midiTrack && EditManager::isMidiFxPlugin(plugin)) continue;
         addSlot(plugin);
     }

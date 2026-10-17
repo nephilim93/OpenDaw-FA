@@ -192,6 +192,12 @@ QWidget* SettingsDialog::createMidiPage()
             audio_.virtualMidiPorts().setEnabled(on);
         });
         virtualLayout->addWidget(publish);
+        auto* clock = new QCheckBox("Send MIDI clock and start/stop on \"OpenDaw Out\"", virtualGroup);
+        clock->setAccessibleName("Virtual MIDI clock");
+        clock->setChecked(audio_.virtualMidiPorts().clockEnabled());
+        clock->setToolTip("Other apps (VCV Rack's MIDI > CV clock, ...) follow OpenDaw's tempo and transport");
+        connect(clock, &QCheckBox::toggled, this, [this](bool on) { audio_.virtualMidiPorts().setClockEnabled(on); });
+        virtualLayout->addWidget(clock);
         virtualLayout->addWidget(makeNote(
             "Other apps send to \"OpenDaw In\": choose it as a MIDI track's input. To play another "
             "app from OpenDaw, give a track the MIDI Out instrument and choose \"OpenDaw Out\" "

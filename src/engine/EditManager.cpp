@@ -1,6 +1,7 @@
 #include "EditManager.h"
 #include "midifx/VelocityFxPlugin.h"
 #include "drums/DrumMachinePlugin.h"
+#include "midiports/MidiClockPlugin.h"
 #include "midiports/MidiOutPlugin.h"
 #include "modular/ModularSynthPlugin.h"
 #include <QSettings>
@@ -110,6 +111,7 @@ void EditManager::createDefaultEdit()
     edit_->ensureNumberOfAudioTracks(4);
     qDebug() << "[createDefaultEdit] 4 tracks ensured";
     ensureLevelMetersOnAllTracks();
+    ensureMidiClock();
     qDebug() << "[createDefaultEdit] level meters done";
     enableAllWaveInputDevices();
     qDebug() << "[createDefaultEdit] wave inputs enabled";
@@ -156,6 +158,7 @@ bool EditManager::loadEdit(const juce::File& file)
 
     qDebug() << "[loadEdit] ensuring level meters";
     ensureLevelMetersOnAllTracks();
+    ensureMidiClock();
 
     qDebug() << "[loadEdit] detecting MIDI tracks";
     for (auto* track : te::getAudioTracks(*edit_)) {
@@ -2343,6 +2346,15 @@ void EditManager::ensureLevelMetersOnAllTracks()
                 juce::String(te::LevelMeterPlugin::xmlTypeName), {}))
             edit_->getMasterPluginList().insertPlugin(p, -1, nullptr);
     }
+}
+
+void EditManager::ensureMidiClock()
+{
+    // Hidden, first on the master: sends clock and transport on OpenDaw Out.
+    auto& master = edit_->getMasterPluginList();
+    if (!master.getPluginsOfType<MidiClockPlugin>().isEmpty()) return;
+    if (auto p = edit_->getPluginCache().createNewPlugin(juce::String(MidiClockPlugin::xmlTypeName), {}))
+        master.insertPlugin(p, 0, nullptr);
 }
 
 } // namespace OpenDaw
