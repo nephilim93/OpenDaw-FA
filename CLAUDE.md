@@ -4,9 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**OpenDaw** — a free, open-source DAW for Windows. Qt 6 handles all GUI; Tracktion Engine (built on JUCE) handles all audio. The binary is produced at `build\OpenDaw_artefacts\Debug\OpenDaw.exe`.
+**OpenDaw** — a free, open-source DAW for Windows, macOS and Linux. Qt 6 handles all GUI; Tracktion Engine (built on JUCE) handles all audio. The binary is produced at `build\OpenDaw_artefacts\Debug\OpenDaw.exe` (Windows) or `build/OpenDaw_artefacts/Debug/OpenDaw` (macOS/Linux).
 
 ## Build Commands
+
+### Windows
 
 All commands must run from a **Visual Studio Developer Command Prompt** (or wrap with `vcvarsall.bat`):
 
@@ -26,7 +28,30 @@ $env:PATH = "c:\qt\6.10.2\msvc2022_64\bin;" + $env:PATH
 .\build\OpenDaw_artefacts\Debug\OpenDaw.exe
 ```
 
-First build takes 2-4 minutes (compiling JUCE/Tracktion). Incremental rebuilds take ~10-15 seconds. There is no test suite.
+First build takes 2-4 minutes (compiling JUCE/Tracktion). Incremental rebuilds take ~10-15 seconds.
+
+### Linux / macOS
+
+```bash
+cmake -B build -DOPENDAW_WITH_FAUST=ON -DOPENDAW_BUILD_TESTS=ON
+cmake --build build -j 4
+./build/OpenDaw_artefacts/Debug/OpenDaw
+```
+
+Limit parallel jobs (`-j 4`) on machines with less than ~16 GB of RAM; an unbounded build can exhaust memory. On Linux the app log is written to `~/.local/share/OpenDaw/OpenDaw/OpenDaw.log` (overwritten on each launch).
+
+### Build options
+
+| Option | Default | Purpose |
+|--------|---------|---------|
+| `OPENDAW_WITH_FAUST` | OFF | Faust code modules in the Modular Synth (needs libfaust) |
+| `OPENDAW_BUILD_TESTS` | OFF | Modular engine / drum test suite (CTest) |
+| `OPENDAW_BUILD_EDITOR_TESTS` | OFF | Modular editor and Drums tab UI tests |
+| `OPENDAW_BUILD_MODULAR_EVAL` | OFF | Modular patching eval runner |
+
+## Tests
+
+Configure with `-DOPENDAW_BUILD_TESTS=ON`, build, then run `ctest --test-dir build` (14 groups, a few seconds). Test sources live in `tests/` (`modular`, `drums`, and with `OPENDAW_BUILD_EDITOR_TESTS`, `modular_editor`, `drums_ui`).
 
 ## Architecture
 
@@ -110,7 +135,7 @@ A single video file can be attached per Edit (stored via `Edit::setVideoFile`/`E
 - `libs/tracktion_engine` — audio engine
 
 After cloning without `--recurse-submodules`, run:
-```powershell
+```bash
 git submodule update --init --depth 1
 cd libs/JUCE && git checkout 7c89e11f6b7316c369f3d3f22227c60e816e738b
 ```
