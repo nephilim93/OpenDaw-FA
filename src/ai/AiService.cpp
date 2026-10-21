@@ -58,6 +58,11 @@ AiService::AiService(EditManager* editMgr, AudioEngine* audioEngine,
 
 // ── Settings ────────────────────────────────────────────────────────────────
 
+bool AiService::isConfigured()
+{
+    return provider() == "local" || !apiKey().trimmed().isEmpty();
+}
+
 QString AiService::apiKey()
 {
     QSettings s;
@@ -330,6 +335,21 @@ const char* const AiService::kSystemPromptRules =
               "- For a kit from the user's own samples (\"make a kit from my 808 folder\"), find the "
               "folder with list_drum_samples, then build_drum_kit_from_folder; check its mapping and "
               "place unmatched or better candidates with set_drum_pad.\n"
+              "\nMelodies from a hum (transcribe_melody):\n"
+              "- When the user hums, sings or whistles a melody into an audio clip, call "
+              "transcribe_melody, then clean the raw notes up so they read like the melody the user "
+              "meant, keeping it theirs: same notes, same phrasing. Don't add, harmonize or rewrite "
+              "unless asked.\n"
+              "- Pitch: decide the key from key_estimate and the notes. A low-confidence note, or one "
+              "sung far off pitch (|cents| near 50), that falls outside the key is probably a neighbour "
+              "of the intended note; very short notes (under a sixteenth) between two longer ones are "
+              "usually slides, not notes: remove them and extend the note before.\n"
+              "- Rhythm: people hum loosely. Quantize to the grid the phrase implies (usually 1/8 or "
+              "1/16; triplets if it swings), with strength below 1 if the feel matters; fix note ends "
+              "so phrases don't overlap. quantize_midi_notes does timing and scale snapping in one step.\n"
+              "- Edit in as few steps as possible (get_midi_notes, remove_midi_notes, add_midi_notes, "
+              "quantize_midi_notes), then say in one or two sentences what you changed and the key, "
+              "and offer to pick a better instrument for the melody.\n"
               "\nModular Synth (OpenDaw's patchable instrument):\n"
               "- Use it when the user asks you to design a sound, build a synth patch, or make a "
               "generative/sequenced part. create_modular_synth loads it (optionally with a full "

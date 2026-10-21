@@ -42,6 +42,7 @@ private:
     void registerHandlers();
     void registerModularHandlers();  // AiModularTools.cpp
     void registerDrumHandlers();     // AiDrumTools.cpp
+    void registerMelodyHandlers();   // AiMelodyTools.cpp
 
     EditManager* editMgr_;
     AudioEngine* audioEngine_;

@@ -237,6 +237,8 @@ signals:
     void midiClipSelected(te::MidiClip* clip);
     void midiClipModified(te::MidiClip* clip);
     void audioClipDoubleClicked(te::WaveAudioClip* clip);
+    // Clip menu > Convert to MIDI (Melody): MainWindow runs it (with the assistant when set up).
+    void melodyConversionRequested(te::WaveAudioClip* clip);
     void audioClipSelected(te::WaveAudioClip* clip);
     void audioClipModified(te::WaveAudioClip* clip);
 

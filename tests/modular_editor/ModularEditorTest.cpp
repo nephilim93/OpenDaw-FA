@@ -560,6 +560,127 @@ int main(int argc, char** argv)
         EXPECT(dynamic_cast<ModularSynthPlugin*>(editMgr.getTrackInstrument(synthTrack)) != nullptr);
     }
 
+    // ── A hummed melody in an audio clip becomes MIDI (transcribe_melody) ──
+    std::printf("melody to MIDI\n");
+    {
+        PluginScanner scanner(engine);
+        AiToolExecutor tools(&editMgr, &engine, &scanner);
+        // A hum, 0.5 s per note with a "t" gap: E G A G, at 120 BPM = one beat each.
+        const int pitches[] = { 64, 67, 69, 67 };
+        const double sr = 44100.0;
+        juce::AudioBuffer<float> hum(1, int(sr * 2.5));
+        hum.clear();
+        double phase = 0.0;
+        for (int k = 0; k < 4; ++k) {
+            const double hz = 440.0 * std::pow(2.0, (pitches[k] - 69) / 12.0);
+            const int a = int((0.25 + 0.5 * k) * sr), b = a + int(0.42 * sr);
+            for (int i = a; i < b; ++i) {
+                phase += 2.0 * juce::MathConstants<double>::pi * hz / sr;
+                const double env = std::min({ 1.0, (i - a) / (0.01 * sr), (b - i) / (0.02 * sr) });
+                double v = 0.0;
+                for (int h = 1; h <= 8; ++h) v += std::sin(h * phase) / h;
+                hum.setSample(0, i, float(0.15 * env * v));
+            }
+        }
+        const auto wav = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("opendaw_hum_test.wav");
+        wav.deleteFile();
+        {
+            juce::WavAudioFormat format;
+            std::unique_ptr<juce::OutputStream> stream(wav.createOutputStream().release());
+            std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(stream.get(), sr, 1, 16, {}, 0));
+            if (writer) {
+                stream.release();
+                writer->writeFromAudioSampleBuffer(hum, 0, hum.getNumSamples());
+            }
+        }
+        auto* vocal = editMgr.addAudioTrack();
+        vocal->setName("Hum");
+        editMgr.addAudioClipToTrack(*vocal, wav, 4.0);   // bar 2
+        EXPECT(vocal->getClips().size() == 1);
+        const int tracksBefore = te::getAudioTracks(*editMgr.edit()).size();
+
+        um.clearUndoHistory();
+        // An edit just before: undoing the conversion must not take it too.
+        um.beginNewTransaction("Rename");
+        vocal->setName("Hum");
+        vocal->state.setProperty("testMarker", 1, &um);
+        const auto r = tools.execute(AiToolCall{ "m1", "transcribe_melody", QJsonObject{ { "track", "Hum" }, { "clip_index", 0 } } });
+        if (r.isError) std::printf("    (transcribe_melody error: %s)\n", r.content.toUtf8().constData());
+        EXPECT(!r.isError);
+        const auto out = QJsonDocument::fromJson(r.content.toUtf8()).object();
+        const auto notes = out["notes"].toArray();
+        EXPECT(notes.size() == 4);
+        bool pitchesOk = notes.size() == 4, timingOk = notes.size() == 4;
+        for (int k = 0; k < notes.size() && k < 4; ++k) {
+            const auto n = notes[k].toObject();
+            pitchesOk &= n["note"].toInt() == pitches[k];
+            // Beat k (+0.5 for the 0.25 s lead-in), from the clip start.
+            timingOk &= std::abs(n["start_beat"].toDouble() - (0.5 + k)) < 0.08
+                        && std::abs(n["length_beats"].toDouble() - 0.84) < 0.1;
+        }
+        EXPECT(pitchesOk);
+        EXPECT(timingOk);
+        EXPECT(notes.size() > 0 && notes[0].toObject()["name"] == "E4");
+        EXPECT(out["midi_track"] == "Hum Melody");
+        EXPECT(out["clip_start_beat"].toDouble() == 4.0);
+        EXPECT(out["tempo_bpm"].toDouble() == 120.0);
+        EXPECT(!out.contains("low_confidence"));
+        EXPECT(te::getAudioTracks(*editMgr.edit()).size() == tracksBefore + 1);
+        auto* melodyTrack = te::getAudioTracks(*editMgr.edit()).getLast();
+        EXPECT(dynamic_cast<ModularSynthPlugin*>(editMgr.getTrackInstrument(melodyTrack)) != nullptr);
+        auto* melodyClip = melodyTrack ? dynamic_cast<te::MidiClip*>(melodyTrack->getClips().getFirst()) : nullptr;
+        EXPECT(melodyClip && std::abs(melodyClip->getStartBeat().inBeats() - 4.0) < 1.0e-6);
+        EXPECT(melodyClip && melodyClip->getSequence().getNumNotes() == 4);
+        // In the clip, notes sit from the clip start, as reported.
+        EXPECT(melodyClip && melodyClip->getSequence().getNumNotes() > 0
+               && std::abs(melodyClip->getSequence().getNote(0)->getStartBeat().inBeats() - 0.5) < 0.08);
+        EXPECT(countUndoSteps(um) == 2);   // the marker, then the conversion
+        um.undo();
+        EXPECT(te::getAudioTracks(*editMgr.edit()).size() == tracksBefore);   // one step undoes it all
+        EXPECT(int(vocal->state.getProperty("testMarker", 0)) == 1);          // and only it
+
+        // A clip trimmed past the first note (it ends at 0.67 s): notes are
+        // timed from where the clip starts playing.
+        auto* hc = vocal->getClips().getFirst();
+        hc->setStart(hc->getPosition().getStart() + tracktion::TimeDuration::fromSeconds(0.7), true, false);
+        const auto trimmed = QJsonDocument::fromJson(tools.execute(AiToolCall{ "m2", "transcribe_melody",
+            QJsonObject{ { "track", "Hum" }, { "clip_index", 0 } } }).content.toUtf8()).object();
+        const auto tn = trimmed["notes"].toArray();
+        EXPECT(tn.size() == 3 && tn[0].toObject()["note"].toInt() == 67);
+        EXPECT(tn.size() == 3 && std::abs(tn[0].toObject()["start_beat"].toDouble() - 0.1) < 0.08);   // G at 0.75 s
+        um.undo();
+
+        // Errors change nothing.
+        auto* midiOnly = editMgr.addMidiTrack();
+        midiOnly->setName("Keys2");
+        editMgr.addMidiClipToTrack(*midiOnly, 0.0, 4.0);
+        const auto notAudio = tools.execute(AiToolCall{ "m3", "transcribe_melody", QJsonObject{ { "track", "Keys2" }, { "clip_index", 0 } } });
+        EXPECT(notAudio.isError && notAudio.content.contains("not an audio clip"));
+        juce::AudioBuffer<float> silence(1, int(sr));
+        silence.clear();
+        const auto quiet = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("opendaw_silence_test.wav");
+        quiet.deleteFile();
+        {
+            juce::WavAudioFormat format;
+            std::unique_ptr<juce::OutputStream> stream(quiet.createOutputStream().release());
+            std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(stream.get(), sr, 1, 16, {}, 0));
+            if (writer) {
+                stream.release();
+                writer->writeFromAudioSampleBuffer(silence, 0, silence.getNumSamples());
+            }
+        }
+        auto* empty = editMgr.addAudioTrack();
+        empty->setName("Quiet");
+        editMgr.addAudioClipToTrack(*empty, quiet, 0.0);
+        const int before = te::getAudioTracks(*editMgr.edit()).size();
+        um.clearUndoHistory();
+        const auto none = tools.execute(AiToolCall{ "m4", "transcribe_melody", QJsonObject{ { "track", "Quiet" }, { "clip_index", 0 } } });
+        EXPECT(none.isError && none.content.contains("No melody found"));
+        EXPECT(te::getAudioTracks(*editMgr.edit()).size() == before && !um.canUndo());
+        wav.deleteFile();
+        quiet.deleteFile();
+    }
+
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);
     view.setTrack(nullptr);
     return failures ? 1 : 0;

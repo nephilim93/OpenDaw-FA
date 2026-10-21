@@ -759,6 +759,8 @@ QJsonArray AiToolDefs::allTools()
     // ── Drum Machine ────────────────────────────────────────────────────────
     for (const auto& t : drumTools())
         tools.append(t);
+    for (const auto& t : melodyTools())
+        tools.append(t);
 
     return tools;
 }

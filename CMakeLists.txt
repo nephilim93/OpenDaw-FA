@@ -201,6 +201,7 @@ set(OpenDaw_SOURCES
     src/engine/midiports/VirtualMidiPorts.h src/engine/midiports/VirtualMidiPorts.cpp
     src/engine/midiports/MidiOutPlugin.h src/engine/midiports/MidiOutPlugin.cpp
     src/engine/midiports/MidiClockPlugin.h src/engine/midiports/MidiClockPlugin.cpp
+    src/engine/MelodyToMidi.h src/engine/MelodyToMidi.cpp
     src/ai/AiTypes.h
     src/ai/AiAudioAnalysis.h      src/ai/AiAudioAnalysis.cpp
     src/ai/AiToolDefs.h            src/ai/AiToolDefs.cpp
@@ -209,6 +210,7 @@ set(OpenDaw_SOURCES
     src/ai/AiOpenAiCompat.h src/ai/AiOpenAiCompat.cpp
     src/ai/AiModularTools.cpp
     src/ai/AiDrumTools.cpp
+    src/ai/AiMelodyTools.cpp
     src/ai/AiChatStore.h           src/ai/AiChatStore.cpp
     src/ai/AiChatWidget.h          src/ai/AiChatWidget.cpp
     src/ai/AiQuickPrompt.h         src/ai/AiQuickPrompt.cpp

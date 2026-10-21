@@ -431,6 +431,10 @@ void ClipItem::mousePressEvent(QGraphicsSceneMouseEvent* event)
                 if (auto* wc = dynamic_cast<te::WaveAudioClip*>(clip_))
                     emit editMgr_->audioClipDoubleClicked(wc);
             });
+            menu.addAction("Convert to MIDI (Melody)", [this]() {
+                if (auto* wc = dynamic_cast<te::WaveAudioClip*>(clip_))
+                    emit editMgr_->melodyConversionRequested(wc);
+            });
             menu.addSeparator();
         }
 

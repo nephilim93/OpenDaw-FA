@@ -41,6 +41,8 @@ public:
     void requestSessionTitle(const QString& userMessage);
 
     // Settings (stored in QSettings; edited from the Settings window)
+    // A key for Claude, or a local server: the assistant can answer.
+    static bool isConfigured();
     static QString apiKey();
     static void setApiKey(const QString& key);
 

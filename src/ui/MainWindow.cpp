@@ -10,6 +10,7 @@
 #include "ui/drums/DrumsViewLink.h"
 #include "ui/dialogs/ExportDialog.h"
 #include "ui/dialogs/MidiOutDialog.h"
+#include "engine/MelodyToMidi.h"
 #include "engine/midiports/MidiOutPlugin.h"
 #include "ui/dialogs/SettingsDialog.h"
 #include "ui/video/VideoPlayerWidget.h"
@@ -966,6 +967,9 @@ void MainWindow::createDocks()
     tabifyDockWidget(drumsDock_, videoPlayerDock_);
     mixerDock_->raise();
 
+    connect(&editMgr_, &EditManager::melodyConversionRequested,
+            this, &MainWindow::convertMelodyToMidi);
+
     connect(&editMgr_, &EditManager::midiClipDoubleClicked,
             this, &MainWindow::onMidiClipDoubleClicked);
 
@@ -1387,6 +1391,48 @@ void MainWindow::showModularEditor(te::AudioTrack* track)
     modularEditor_->setTrack(track);
     modularDock_->setVisible(true);
     modularDock_->raise();
+}
+
+void MainWindow::convertMelodyToMidi(te::WaveAudioClip* clip)
+{
+    auto* edit = editMgr_.edit();
+    auto* track = clip ? dynamic_cast<te::AudioTrack*>(clip->getTrack()) : nullptr;
+    if (!edit || !track) return;
+    int trackIndex = 0;
+    for (auto* t : te::getAudioTracks(*edit)) {
+        if (t == track) break;
+        ++trackIndex;
+    }
+    const int clipIndex = track->getClips().indexOf(clip);
+    const QString trackName = QString::fromUtf8(track->getName().toRawUTF8());
+    const QString clipName = QString::fromUtf8(clip->getName().toRawUTF8());
+
+    // AI driven: the assistant transcribes and cleans up, visibly, in the chat.
+    if (aiChatWidget_ && AiService::isConfigured()) {
+        aiDock_->setVisible(true);
+        aiDock_->raise();
+        aiChatWidget_->submitPrompt(
+            QString("Convert the melody I hummed in the audio clip \"%1\" (track %2, \"%3\", clip_index %4) "
+                    "to MIDI with transcribe_melody, then clean it up.")
+                .arg(clipName).arg(trackIndex).arg(trackName).arg(clipIndex));
+        return;
+    }
+
+    // No assistant set up: the raw transcription, and how to get the cleanup.
+    QString error;
+    const auto converted = MelodyToMidi::convert(editMgr_, *clip, {}, "Convert to MIDI (Melody)", &error);
+    if (!converted) {
+        QMessageBox::information(this, "Convert to MIDI", error);
+        return;
+    }
+    emit editMgr_.tracksChanged();
+    const auto& r = converted->transcription.result;
+    QMessageBox::information(this, "Convert to MIDI",
+        QString("%1 notes, about %2, on the new track \"%3\".\n\nSet up the assistant (Settings > AI) and it "
+                "will also clean the notes up: wrong notes, timing and key.")
+            .arg(r.notes.size())
+            .arg(QString::fromStdString(Melody::keyName(r.keyTonic, r.keyMinor)))
+            .arg(QString::fromUtf8(converted->track->getName().toRawUTF8())));
 }
 
 void MainWindow::showDrumsView(te::AudioTrack* track)
