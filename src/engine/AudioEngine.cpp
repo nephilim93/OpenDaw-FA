@@ -6,22 +6,37 @@
 #include "midiports/VirtualMidiPorts.h"
 #include "modular/ModularSynthPlugin.h"
 #include <QSettings>
+#include <QStandardPaths>
 
 namespace OpenDaw {
 
-#if JUCE_LINUX
 namespace {
-// Tracktion opens the default device with every channel it reports before
-// setDefaultAudioDevice() narrows it to stereo. Through PipeWire's ALSA
-// plugin that is 128 capture channels, which crashes PipeWire's converter.
-// Skip the automatic open; setDefaultAudioDevice() opens the device instead.
-//
-// PipeWire's "default" device also reports 128 channel names while only the
-// opened ones reach the audio callback, so describe wave devices for the
-// active channels only. Otherwise Tracktion creates inputs for channels that
-// never arrive and asserts on every audio block.
 class OpenDawEngineBehaviour : public te::EngineBehaviour {
 public:
+    // Tracktion records next to the edit file, or into the working directory
+    // when the edit hasn't been saved. Launched from Finder that is "/", which
+    // is read-only, so the take silently fails. Record unsaved edits into a
+    // folder under Music instead.
+    juce::File getDefaultFolderForAudioRecordings(te::Edit&) override
+    {
+        auto music = QStandardPaths::writableLocation(QStandardPaths::MusicLocation);
+        if (music.isEmpty())
+            music = QStandardPaths::writableLocation(QStandardPaths::HomeLocation);
+        juce::File folder(juce::String((music + "/OpenDaw/Recordings").toStdString()));
+        folder.createDirectory();
+        return folder;
+    }
+
+#if JUCE_LINUX
+    // Tracktion opens the default device with every channel it reports before
+    // setDefaultAudioDevice() narrows it to stereo. Through PipeWire's ALSA
+    // plugin that is 128 capture channels, which crashes PipeWire's converter.
+    // Skip the automatic open; setDefaultAudioDevice() opens the device instead.
+    //
+    // PipeWire's "default" device also reports 128 channel names while only the
+    // opened ones reach the audio callback, so describe wave devices for the
+    // active channels only. Otherwise Tracktion creates inputs for channels that
+    // never arrive and asserts on every audio block.
     bool autoInitialiseDeviceManager() override { return false; }
 
     bool isDescriptionOfWaveDevicesSupported() override { return true; }
@@ -42,18 +57,14 @@ public:
                 descriptions.emplace_back(prefix + juce::String(i + 1), i, -1, true);
         }
     }
+#endif
 };
 }
-#endif
 
 AudioEngine::AudioEngine()
 {
-#if JUCE_LINUX
     engine_ = std::make_unique<te::Engine>("OpenDaw", nullptr,
                                            std::make_unique<OpenDawEngineBehaviour>());
-#else
-    engine_ = std::make_unique<te::Engine>("OpenDaw");
-#endif
 
     // OpenDaw's own plugin types, so edits can create and reload them.
     engine_->getPluginManager().createBuiltInType<VelocityFxPlugin>();
