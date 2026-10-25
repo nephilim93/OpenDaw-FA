@@ -262,6 +262,15 @@ private:
 
     AudioEngine& audioEngine_;
     std::unique_ptr<te::Edit> edit_;
+
+    // Tracktion adds recorded clips to the edit without telling the UI.
+    struct RecordingListener : te::TransportControl::Listener {
+        explicit RecordingListener(EditManager& m) : mgr(m) {}
+        void recordingFinished(te::InputDeviceInstance&, te::EditItemID,
+                               const juce::ReferenceCountedArray<te::Clip>&) override;
+        EditManager& mgr;
+    };
+    RecordingListener recordingListener_ { *this };
     juce::File currentFile_;
     std::unordered_set<uint64_t> midiTrackIds_;
     std::map<std::string, QString> inputDisplayNames_;

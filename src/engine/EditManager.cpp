@@ -68,9 +68,19 @@ EditManager::~EditManager()
     teardownCurrentEdit();
 }
 
+void EditManager::RecordingListener::recordingFinished(
+    te::InputDeviceInstance&, te::EditItemID, const juce::ReferenceCountedArray<te::Clip>& clips)
+{
+    if (!clips.isEmpty())
+        QMetaObject::invokeMethod(&mgr, [m = &mgr]() { m->markDirtyAndNotify(); },
+                                  Qt::QueuedConnection);
+}
+
 void EditManager::teardownCurrentEdit()
 {
     if (!edit_) return;
+
+    edit_->getTransport().removeListener(&recordingListener_);
 
     qDebug() << "[teardown] emitting aboutToChangeEdit";
     emit aboutToChangeEdit();
@@ -116,6 +126,7 @@ void EditManager::createDefaultEdit()
     enableAllWaveInputDevices();
     qDebug() << "[createDefaultEdit] wave inputs enabled";
     edit_->getTransport().ensureContextAllocated();
+    edit_->getTransport().addListener(&recordingListener_);
     qDebug() << "[createDefaultEdit] context allocated";
 
     auto& arm = edit_->getAutomationRecordManager();
@@ -176,6 +187,7 @@ bool EditManager::loadEdit(const juce::File& file)
 
     qDebug() << "[loadEdit] allocating playback context";
     edit_->getTransport().ensureContextAllocated();
+    edit_->getTransport().addListener(&recordingListener_);
     qDebug() << "[loadEdit] playback context ready";
 
     auto& arm = edit_->getAutomationRecordManager();
