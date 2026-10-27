@@ -239,6 +239,8 @@ signals:
     void audioClipDoubleClicked(te::WaveAudioClip* clip);
     // Clip menu > Convert to MIDI (Melody): MainWindow runs it (with the assistant when set up).
     void melodyConversionRequested(te::WaveAudioClip* clip);
+    // Clips a recording just made (on the message thread, as recording stops).
+    void clipsRecorded(const QList<te::Clip*>& clips);
     void audioClipSelected(te::WaveAudioClip* clip);
     void audioClipModified(te::WaveAudioClip* clip);
 

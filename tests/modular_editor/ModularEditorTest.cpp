@@ -7,6 +7,7 @@
 #include "app/JuceQtBridge.h"
 #include "engine/AudioEngine.h"
 #include "engine/EditManager.h"
+#include "engine/HumRecorder.h"
 #include "ai/AiToolExecutor.h"
 #include "engine/PluginScanner.h"
 #include "drums/SampleLibrary.h"
@@ -19,6 +20,9 @@
 #include "ui/modular/ModulePanelItem.h"
 
 #include <QApplication>
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
 #include <QElapsedTimer>
 #include <QGraphicsView>
 #include <QJsonDocument>
@@ -44,8 +48,13 @@ void settle(int ms = 50)
 {
     QElapsedTimer t;
     t.start();
-    while (t.elapsed() < ms)
+    while (t.elapsed() < ms) {
         QCoreApplication::processEvents(QEventLoop::AllEvents, 10);
+#if JUCE_MAC
+        // Offscreen Qt doesn't run the native loop JUCE's timers post to.
+        CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.005, true);
+#endif
+    }
 }
 
 void send(QWidget* target, QEvent::Type type, QPoint pos, Qt::MouseButton button,
@@ -677,6 +686,93 @@ int main(int argc, char** argv)
         const auto none = tools.execute(AiToolCall{ "m4", "transcribe_melody", QJsonObject{ { "track", "Quiet" }, { "clip_index", 0 } } });
         EXPECT(none.isError && none.content.contains("No melody found"));
         EXPECT(te::getAudioTracks(*editMgr.edit()).size() == before && !um.canUndo());
+
+        // ── The Hum button: track set-up, and the take goes to Convert to MIDI ──
+        std::printf("hum recorder\n");
+        EXPECT(HumRecorder::noteName(440.0) == "A4");
+        EXPECT(HumRecorder::noteName(440.0 * std::pow(2.0, 0.12 / 12.0)) == QString::fromUtf8("A4 +12¢"));
+        EXPECT(HumRecorder::noteName(261.6256 * std::pow(2.0, -0.3 / 12.0)) == QString::fromUtf8("C4 -30¢"));
+        EXPECT(HumRecorder::noteName(0.0).isEmpty());
+        {
+            auto* edit = editMgr.edit();
+            // An audio device, for its inputs (none on a machine without one).
+            engine.setDefaultAudioDevice();
+            editMgr.enableAllWaveInputDevices();
+            edit->getTransport().ensureContextAllocated();
+            settle();
+            te::InputDeviceInstance* input = nullptr;
+            for (auto* in : edit->getAllInputDevices())
+                if (in->getInputDevice().getDeviceType() == te::InputDevice::waveDevice) { input = in; break; }
+            HumRecorder hum(editMgr);
+            if (!input) {
+                QString error;
+                EXPECT(hum.prepareTrack(&error) == nullptr && error.contains("no audio input"));
+                std::printf("    (no audio input here: only the no-input case was checked)\n");
+            } else {
+                // The user's own track has the input and is armed.
+                auto* mine = editMgr.addAudioTrack();
+                mine->setName("Vocals");
+                (void) input->setTarget(mine->itemID, false, &um, 0);
+                input->setRecordingEnabled(mine->itemID, true);
+                const int before = te::getAudioTracks(*edit).size();
+                QString error;
+                auto* humTrack = hum.prepareTrack(&error);
+                EXPECT(humTrack && humTrack->getName() == "Hum");
+                // "Hum" exists already (the melody test's), so it is reused.
+                EXPECT(humTrack == vocal && te::getAudioTracks(*edit).size() == before);
+                EXPECT(input->getTargets().contains(mine->itemID) && input->getTargets().contains(vocal->itemID));
+                EXPECT(input->isRecordingEnabled(vocal->itemID) && !input->isRecordingEnabled(mine->itemID));
+
+                te::WaveAudioClip* converted = nullptr;
+                QObject::connect(&editMgr, &EditManager::melodyConversionRequested, &hum,
+                                 [&](te::WaveAudioClip* c) { converted = c; });
+                // A clip from another track is not the take.
+                editMgr.addAudioClipToTrack(*mine, wav, 0.0);
+                hum.takeRecorded({ mine->getClips().getLast() });
+                settle();
+                EXPECT(converted == nullptr && input->isRecordingEnabled(vocal->itemID));
+                auto* take = dynamic_cast<te::WaveAudioClip*>(vocal->getClips().getFirst());
+                hum.takeRecorded({ mine->getClips().getLast(), take });
+                settle();
+                EXPECT(converted == take);
+                // Arming is back as it was.
+                EXPECT(input->isRecordingEnabled(mine->itemID) && !input->isRecordingEnabled(vocal->itemID));
+                EXPECT(hum.state() == HumRecorder::State::Idle);
+
+                // No Hum track yet: one is added.
+                vocal->setName("Hum take");
+                auto* fresh = hum.prepareTrack(&error);
+                EXPECT(fresh && fresh != vocal && fresh->getName() == "Hum"
+                       && te::getAudioTracks(*edit).size() == before + 1);
+                EXPECT(fresh && input->isRecordingEnabled(fresh->itemID));
+
+                // A real take: count-in, recording, stop -> Convert to MIDI.
+                converted = nullptr;
+                QStringList readouts;
+                QObject::connect(&hum, &HumRecorder::readoutChanged, &hum,
+                                 [&](const QString& t) { readouts << t; });
+                edit->setCountInMode(te::Edit::CountIn::none);
+                edit->getTransport().setPosition(tracktion::TimePosition::fromSeconds(0.0));
+                EXPECT(hum.start(&error));
+                EXPECT(hum.state() == HumRecorder::State::CountIn);
+                EXPECT(edit->getCountInMode() == te::Edit::CountIn::oneBar);
+                QElapsedTimer clock;
+                clock.start();
+                while (clock.elapsed() < 6000 && hum.state() != HumRecorder::State::Recording) settle(20);
+                EXPECT(hum.state() == HumRecorder::State::Recording);
+                EXPECT(clock.elapsed() > 1500);   // one bar at 120 BPM is 2 s
+                settle(600);
+                hum.stop();
+                settle(300);
+                EXPECT(hum.state() == HumRecorder::State::Idle && !edit->getTransport().isRecording());
+                EXPECT(converted != nullptr && converted->getTrack() == fresh);
+                EXPECT(edit->getCountInMode() == te::Edit::CountIn::none);
+                EXPECT(input->isRecordingEnabled(mine->itemID) && !input->isRecordingEnabled(fresh->itemID));
+                EXPECT(readouts.size() >= 3 && readouts.first() == "Count-in 4" && readouts.last().isEmpty());
+                if (converted) converted->getSourceFileReference().getFile().deleteFile();
+            }
+        }
+
         wav.deleteFile();
         quiet.deleteFile();
     }

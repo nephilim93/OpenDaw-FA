@@ -1,6 +1,7 @@
 ﻿#pragma once
 
 #include "engine/EditManager.h"
+#include "engine/HumRecorder.h"
 #include <QWidget>
 #include <QHBoxLayout>
 #include <QPushButton>
@@ -28,6 +29,7 @@ private slots:
     void onPlay();
     void onStop();
     void onRecord();
+    void onHum();
     void onLoop();
     void onMetronome();
     void onCountIn();
@@ -48,6 +50,9 @@ private:
     QPushButton* playBtn_;
     QPushButton* stopBtn_;
     QPushButton* recordBtn_;
+    QPushButton* humBtn_;
+    QLabel*      humLabel_;
+    HumRecorder* hum_;
     QPushButton* loopBtn_;
     QPushButton* metronomeBtn_;
     QPushButton* countInBtn_;

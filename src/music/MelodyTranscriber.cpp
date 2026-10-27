@@ -184,6 +184,37 @@ std::string keyName(int tonic, bool minor)
     return std::string(kNames[((tonic % 12) + 12) % 12]) + (minor ? " minor" : " major");
 }
 
+Frame detectPitch(const std::vector<float>& recent, double sampleRate, const Options& options)
+{
+    Frame f;
+    if (recent.empty() || sampleRate <= 0.0) return f;
+    const int factor = std::max(1, int(std::lround(sampleRate / kAnalysisRate)));
+    const double rate = sampleRate / factor;
+    const int tauMin = std::max(2, int(std::floor(rate / options.maxHz)));
+    const int tauMax = std::max(tauMin + 2, int(std::ceil(rate / options.minHz)));
+    const int window = std::max(tauMax, int(std::lround(rate * 0.02)));
+    const size_t span = size_t(window + tauMax + 2);
+    // Only the end matters; keep a little extra for the filter to settle.
+    const size_t keep = std::min(recent.size(), (span + 64) * size_t(factor));
+    std::vector<float> x = decimate(std::vector<float>(recent.end() - long(keep), recent.end()), factor);
+    if (x.size() < span) return f;
+    double mean = 0.0;
+    for (auto v : x) mean += v;
+    mean /= double(x.size());
+    for (auto& v : x) v = float(v - mean);
+
+    const size_t start = x.size() - span;
+    double energy = 0.0;
+    for (int j = 0; j < window; ++j) energy += double(x[start + size_t(j)]) * x[start + size_t(j)];
+    const double rms = std::sqrt(energy / window);
+    f.db = rms > 1.0e-9 ? 20.0 * std::log10(rms) : -120.0;
+    f.seconds = double(recent.size()) / sampleRate;
+    std::vector<double> scratch;
+    yin(x, start, window, tauMin, tauMax, rate, scratch, f);
+    if (f.db < kGateFloorDb) f.hz = 0.0;
+    return f;
+}
+
 Result transcribe(const std::vector<float>& input, double sampleRate, const Options& options)
 {
     Result result;

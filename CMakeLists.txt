@@ -202,6 +202,7 @@ set(OpenDaw_SOURCES
     src/engine/midiports/MidiOutPlugin.h src/engine/midiports/MidiOutPlugin.cpp
     src/engine/midiports/MidiClockPlugin.h src/engine/midiports/MidiClockPlugin.cpp
     src/engine/MelodyToMidi.h src/engine/MelodyToMidi.cpp
+    src/engine/HumRecorder.h src/engine/HumRecorder.cpp
     src/ai/AiTypes.h
     src/ai/AiAudioAnalysis.h      src/ai/AiAudioAnalysis.cpp
     src/ai/AiToolDefs.h            src/ai/AiToolDefs.cpp

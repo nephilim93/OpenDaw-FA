@@ -71,8 +71,11 @@ EditManager::~EditManager()
 void EditManager::RecordingListener::recordingFinished(
     te::InputDeviceInstance&, te::EditItemID, const juce::ReferenceCountedArray<te::Clip>& clips)
 {
-    if (!clips.isEmpty())
-        QMetaObject::invokeMethod(&mgr, [m = &mgr]() { m->markDirtyAndNotify(); },
+    if (clips.isEmpty()) return;
+    QList<te::Clip*> list;
+    for (auto* c : clips) list.append(c);
+    emit mgr.clipsRecorded(list);
+    QMetaObject::invokeMethod(&mgr, [m = &mgr]() { m->markDirtyAndNotify(); },
                                   Qt::QueuedConnection);
 }
 

@@ -268,3 +268,32 @@ TEST(melody, short_blips_are_dropped)
     std::vector<SungNote> withBlip = { notes[0], { 74, 1.15, 1.18 }, notes[1] };
     checkNotes(Mel::transcribe(sing(withBlip, {}, 2.5), 44100.0), notes);
 }
+
+TEST(melody, live_pitch_reading)
+{
+    Voice v;
+    // The last 80 ms of an A3 hum, of a whistled E6, of silence and of a whisper.
+    const auto hum = sing({ { 57, 0.0, 0.5 } }, v, 0.5);
+    const auto a = Mel::detectPitch(std::vector<float>(hum.end() - 3528 - 2205, hum.end() - 2205), 44100.0);
+    CHECK(a.hz > 0.0 && std::abs(69.0 + 12.0 * std::log2(a.hz / 440.0) - 57.0) < 0.5);
+    Voice w;
+    w.whistle = true;
+    w.sampleRate = 48000.0;
+    const auto whistle = sing({ { 88, 0.0, 0.5 } }, w, 0.5);
+    const auto e = Mel::detectPitch(std::vector<float>(whistle.begin() + 12000, whistle.begin() + 15840), 48000.0);
+    CHECK(e.hz > 0.0 && std::abs(69.0 + 12.0 * std::log2(e.hz / 440.0) - 88.0) < 0.5);
+    CHECK(Mel::detectPitch(std::vector<float>(3528, 0.0f), 44100.0).hz == 0.0);
+    std::mt19937 rng(5);
+    std::normal_distribution<float> gauss(0.0f, 0.2f);
+    std::vector<float> whisper(3528);
+    for (auto& s : whisper) s = gauss(rng);
+    CHECK(Mel::detectPitch(whisper, 44100.0).hz == 0.0);
+    // A faint pitched sound far under a voice (a fridge, another room): no reading.
+    Voice faint;
+    faint.level = 0.3 * std::pow(10.0, -48.0 / 20.0);
+    faint.noiseDb = -120.0;
+    const auto far = sing({ { 57, 0.0, 0.5 } }, faint, 0.5);
+    CHECK(Mel::detectPitch(std::vector<float>(far.end() - 3528 - 2205, far.end() - 2205), 44100.0).hz == 0.0);
+    // Too short to measure: no pitch rather than a guess.
+    CHECK(Mel::detectPitch(std::vector<float>(hum.begin() + 4410, hum.begin() + 4600), 44100.0).hz == 0.0);
+}

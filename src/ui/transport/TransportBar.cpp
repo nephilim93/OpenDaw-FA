@@ -3,6 +3,7 @@
 #include "utils/ThemeManager.h"
 #include "utils/IconFont.h"
 #include <QDialog>
+#include <QMessageBox>
 #include <QSettings>
 #include <QVBoxLayout>
 #include <cmath>
@@ -43,6 +44,33 @@ TransportBar::TransportBar(EditManager* editMgr, QWidget* parent)
     stopBtn_   = makeTransportBtn(icons::fa::Stop,   "Stop",   theme.transportStop);
     playBtn_   = makeTransportBtn(icons::fa::Play,   "Play",   theme.transportPlay, true);
     recordBtn_ = makeTransportBtn(icons::fa::Record, "Record", theme.transportRecord, true);
+    humBtn_    = makeTransportBtn(icons::fa::Microphone, "Hum to MIDI", theme.transportRecord, true);
+    humBtn_->setToolTip("Hum to MIDI — sing, hum or whistle after the count-in; "
+                        "press again to stop and turn it into notes");
+    humLabel_ = new QLabel(this);
+    humLabel_->setAccessibleName("Hum Pitch");
+    humLabel_->setFixedWidth(84);
+    humLabel_->setAlignment(Qt::AlignCenter);
+    humLabel_->setStyleSheet(QString("QLabel { color: %1; font-weight: bold; }").arg(theme.text.name()));
+    humLabel_->hide();
+    hum_ = new HumRecorder(*editMgr_, this);
+    connect(hum_, &HumRecorder::readoutChanged, this, [this](const QString& text) {
+        humLabel_->setText(text);
+        humLabel_->setVisible(!text.isEmpty());
+    });
+    connect(hum_, &HumRecorder::stateChanged, this, [this](HumRecorder::State s) {
+        const bool active = s != HumRecorder::State::Idle;
+        humBtn_->setChecked(active);
+        if (active) {
+            isRecording_ = true;
+            recordBtn_->setChecked(true);
+            playBtn_->setChecked(true);
+        } else if (editMgr_->edit() && !editMgr_->transport().isRecording()) {
+            isRecording_ = false;
+            recordBtn_->setChecked(false);
+            playBtn_->setChecked(editMgr_->transport().isPlaying());
+        }
+    });
     loopBtn_   = makeTransportBtn(icons::fa::Loop,   "Loop",   theme.accent, true);
     metronomeBtn_ = makeTransportBtn(icons::fa::Metronome, "Metronome", QColor(60, 180, 200), true);
 
@@ -92,6 +120,7 @@ TransportBar::TransportBar(EditManager* editMgr, QWidget* parent)
     connect(stopBtn_,      &QPushButton::clicked, this, &TransportBar::onStop);
     connect(playBtn_,      &QPushButton::clicked, this, &TransportBar::onPlay);
     connect(recordBtn_,    &QPushButton::clicked, this, &TransportBar::onRecord);
+    connect(humBtn_,       &QPushButton::clicked, this, &TransportBar::onHum);
     connect(loopBtn_,      &QPushButton::clicked, this, &TransportBar::onLoop);
     connect(metronomeBtn_, &QPushButton::clicked, this, &TransportBar::onMetronome);
     connect(countInBtn_,   &QPushButton::clicked, this, &TransportBar::onCountIn);
@@ -133,6 +162,8 @@ TransportBar::TransportBar(EditManager* editMgr, QWidget* parent)
     layout->addWidget(stopBtn_);
     layout->addWidget(playBtn_);
     layout->addWidget(recordBtn_);
+    layout->addWidget(humBtn_);
+    layout->addWidget(humLabel_);
     layout->addWidget(loopBtn_);
     layout->addWidget(metronomeBtn_);
     layout->addWidget(countInBtn_);
@@ -327,6 +358,10 @@ void TransportBar::onRecord()
 {
     if (!editMgr_ || !editMgr_->edit()) return;
     auto& t = editMgr_->transport();
+    if (hum_->state() != HumRecorder::State::Idle) {
+        hum_->stop();
+        return;
+    }
     if (isRecording_) {
         t.stop(false, false);
         isRecording_ = false;
@@ -336,6 +371,21 @@ void TransportBar::onRecord()
     }
     recordBtn_->setChecked(isRecording_);
     playBtn_->setChecked(t.isPlaying());
+}
+
+void TransportBar::onHum()
+{
+    if (!editMgr_ || !editMgr_->edit()) return;
+    if (hum_->state() != HumRecorder::State::Idle) {
+        hum_->stop();
+        return;
+    }
+    QString error;
+    if (!hum_->start(&error)) {
+        humBtn_->setChecked(false);
+        if (!error.isEmpty())
+            QMessageBox::information(window(), "Hum to MIDI", error);
+    }
 }
 
 void TransportBar::onLoop()

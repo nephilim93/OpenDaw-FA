@@ -48,6 +48,11 @@ struct Result {
 
 Result transcribe(const std::vector<float>& mono, double sampleRate, const Options& options = {});
 
+// One live reading from the end of `recent` (the last ~60 ms of input are
+// enough): the pitch now, for a "you are singing A4" readout. hz is 0 for
+// silence, breath or whispers. No tuning correction or octave shift.
+Frame detectPitch(const std::vector<float>& recent, double sampleRate, const Options& options = {});
+
 // "A minor", "C# major".
 std::string keyName(int tonic, bool minor);
 
