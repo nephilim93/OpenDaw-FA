@@ -46,7 +46,7 @@ private:
 
 // The "Hum" button: records a take on a Hum track after a count-in, shows
 // the pitch while you sing, and hands the take to Convert to MIDI
-// (EditManager::melodyConversionRequested) when recording stops.
+// (EditManager::humTakeRecorded, snapped to a scale) when recording stops.
 class HumRecorder : public QObject {
     Q_OBJECT
 public:

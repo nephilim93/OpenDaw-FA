@@ -1,4 +1,5 @@
 #include "MelodyToMidi.h"
+#include "music/Theory.h"
 #include <cmath>
 
 namespace OpenDaw::MelodyToMidi {
@@ -8,7 +9,35 @@ double toBeats(te::Edit& edit, double seconds)
     return edit.tempoSequence.toBeats(tracktion::TimePosition::fromSeconds(seconds)).inBeats();
 }
 
-std::optional<Transcription> transcribe(te::WaveAudioClip& clip, const Melody::Options& options, QString* error)
+QString snapToScale(Melody::Result& result, const QString& scale, std::vector<SnapMove>* moved, QString* error)
+{
+    const QString name = scale.trimmed().compare("auto", Qt::CaseInsensitive) == 0
+                             ? QString::fromStdString(Melody::keyName(result.keyTonic, result.keyMinor))
+                             : scale.trimmed();
+    const auto parsed = Theory::parseScale(name);
+    if (!parsed || parsed->intervals.isEmpty()) {
+        if (error) *error = QString("Unknown scale \"%1\": use a key such as \"A minor\", \"Bb major\" or \"D dorian\", or \"auto\".").arg(scale);
+        return {};
+    }
+    for (size_t i = 0; i < result.notes.size(); ++i) {
+        auto& n = result.notes[i];
+        if (parsed->contains(n.pitch)) continue;
+        int up = n.pitch + 1, down = n.pitch - 1;
+        while (!parsed->contains(up) && up < 127) ++up;
+        while (!parsed->contains(down) && down > 0) --down;
+        int to;
+        if (up - n.pitch != n.pitch - down) to = up - n.pitch < n.pitch - down ? up : down;
+        else to = n.cents >= 0.0 ? up : down;   // as far either way: the way it was sung
+        to = std::clamp(to, 0, 127);
+        if (moved) moved->push_back({ int(i), n.pitch });
+        n.cents += (n.pitch - to) * 100.0;
+        n.pitch = to;
+    }
+    return parsed->name;
+}
+
+std::optional<Transcription> transcribe(te::WaveAudioClip& clip, const Melody::Options& options, QString* error,
+                                        const QString& snapScale)
 {
     const auto file = clip.getOriginalFile();
     juce::AudioFormatManager formats;
@@ -56,18 +85,22 @@ std::optional<Transcription> transcribe(te::WaveAudioClip& clip, const Melody::O
             n.startSeconds /= speed;
             n.endSeconds /= speed;
         }
+    if (!snapScale.isEmpty()) {
+        t.snappedTo = snapToScale(t.result, snapScale, &t.snapped, error);
+        if (t.snappedTo.isEmpty()) return std::nullopt;
+    }
     return t;
 }
 
 std::optional<Converted> convert(EditManager& editMgr, te::WaveAudioClip& clip, const Melody::Options& options,
-                                 const juce::String& undoName, QString* error)
+                                 const juce::String& undoName, QString* error, const QString& snapScale)
 {
     auto* edit = editMgr.edit();
     if (!edit) {
         *error = "No project is open.";
         return std::nullopt;
     }
-    auto transcription = transcribe(clip, options, error);
+    auto transcription = transcribe(clip, options, error, snapScale);
     if (!transcription) return std::nullopt;
     if (transcription->result.notes.empty()) {
         *error = "No melody found: the clip needs humming, singing or whistling (one voice; whispers have no pitch).";

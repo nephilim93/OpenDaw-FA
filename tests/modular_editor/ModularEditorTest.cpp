@@ -8,6 +8,7 @@
 #include "engine/AudioEngine.h"
 #include "engine/EditManager.h"
 #include "engine/HumRecorder.h"
+#include "engine/MelodyToMidi.h"
 #include "ai/AiToolExecutor.h"
 #include "engine/PluginScanner.h"
 #include "drums/SampleLibrary.h"
@@ -687,6 +688,56 @@ int main(int argc, char** argv)
         EXPECT(none.isError && none.content.contains("No melody found"));
         EXPECT(te::getAudioTracks(*editMgr.edit()).size() == before && !um.canUndo());
 
+        // ── Snapping to a scale (the Hum button always does) ──
+        std::printf("snap to scale\n");
+        {
+            auto make = [](std::vector<std::pair<int, double>> pc) {
+                Melody::Result r;
+                for (auto [p, c] : pc) { Melody::Note n; n.pitch = p; n.cents = c; r.notes.push_back(n); }
+                return r;
+            };
+            // In C major: F# sung sharp -> G, C# sung flat -> C, Bb dead on -> B (up), E stays.
+            auto r = make({ { 66, 20.0 }, { 61, -30.0 }, { 70, 0.0 }, { 64, 5.0 } });
+            std::vector<MelodyToMidi::SnapMove> moved;
+            QString error;
+            EXPECT(MelodyToMidi::snapToScale(r, "C major", &moved, &error) == "C major");
+            EXPECT(r.notes[0].pitch == 67 && r.notes[1].pitch == 60 && r.notes[2].pitch == 71 && r.notes[3].pitch == 64);
+            EXPECT(moved.size() == 3 && moved[0].index == 0 && moved[0].fromPitch == 66 && moved[2].fromPitch == 70);
+            EXPECT(std::abs(r.notes[0].cents - (-80.0)) < 1.0e-9);   // now 80 cents under G
+            // A gap of two: the nearer note, whichever way it leaned.
+            auto penta = make({ { 65, 40.0 } });
+            EXPECT(MelodyToMidi::snapToScale(penta, "C major pentatonic", nullptr, &error).contains("pentatonic"));
+            EXPECT(penta.notes[0].pitch == 64);
+            // "auto": the detected key.
+            auto detected = make({ { 70, 0.0 } });
+            detected.keyTonic = 9;
+            detected.keyMinor = true;
+            EXPECT(MelodyToMidi::snapToScale(detected, "auto", nullptr, &error).contains("A"));
+            EXPECT(detected.notes[0].pitch == 71);
+            auto bad = make({ { 61, 0.0 } });
+            EXPECT(MelodyToMidi::snapToScale(bad, "Q flurb", nullptr, &error).isEmpty() && error.contains("Unknown scale"));
+            EXPECT(bad.notes[0].pitch == 61);
+
+            // Through the tool: E G A G is in A minor, so nothing moves; a bad scale changes nothing.
+            const int tracksNow = te::getAudioTracks(*editMgr.edit()).size();
+            const auto badTool = tools.execute(AiToolCall{ "s1", "transcribe_melody",
+                QJsonObject{ { "track", "Hum" }, { "clip_index", 0 }, { "snap_to_scale", "Q flurb" } } });
+            EXPECT(badTool.isError && badTool.content.contains("Unknown scale"));
+            EXPECT(te::getAudioTracks(*editMgr.edit()).size() == tracksNow);
+            const auto snapped = QJsonDocument::fromJson(tools.execute(AiToolCall{ "s2", "transcribe_melody",
+                QJsonObject{ { "track", "Hum" }, { "clip_index", 0 }, { "snap_to_scale", "D major" } } }).content.toUtf8()).object();
+            // G and A are in D major: nothing moves.
+            EXPECT(snapped["snapped_to"].toString().startsWith("D") && snapped["snapped_count"].toInt() == 0);
+            const auto flat = QJsonDocument::fromJson(tools.execute(AiToolCall{ "s3", "transcribe_melody",
+                QJsonObject{ { "track", "Hum" }, { "clip_index", 0 }, { "snap_to_scale", "Eb major" } } }).content.toUtf8()).object();
+            // The clip is trimmed to G A G by now. In Eb major only the A moves: sung dead on, between Ab and Bb, it goes up.
+            int moves = 0;
+            for (const auto& n : flat["notes"].toArray())
+                if (n.toObject().contains("snapped_from")) ++moves;
+            EXPECT(flat["snapped_count"].toInt() == 1 && moves == 1);
+            EXPECT(flat["notes"].toArray().size() == 3 && flat["notes"].toArray()[1].toObject()["note"].toInt() == 70);
+        }
+
         // ── The Hum button: track set-up, and the take goes to Convert to MIDI ──
         std::printf("hum recorder\n");
         EXPECT(HumRecorder::noteName(440.0) == "A4");
@@ -724,7 +775,7 @@ int main(int argc, char** argv)
                 EXPECT(input->isRecordingEnabled(vocal->itemID) && !input->isRecordingEnabled(mine->itemID));
 
                 te::WaveAudioClip* converted = nullptr;
-                QObject::connect(&editMgr, &EditManager::melodyConversionRequested, &hum,
+                QObject::connect(&editMgr, &EditManager::humTakeRecorded, &hum,
                                  [&](te::WaveAudioClip* c) { converted = c; });
                 // A clip from another track is not the take.
                 editMgr.addAudioClipToTrack(*mine, wav, 0.0);

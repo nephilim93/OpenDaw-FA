@@ -82,7 +82,8 @@ private:
     void showModularEditor(te::AudioTrack* track);
     void showDrumsView(te::AudioTrack* track);
     // An audio clip's hummed melody to MIDI: by the assistant when it's set up.
-    void convertMelodyToMidi(te::WaveAudioClip* clip);
+    // snapScale: as MelodyToMidi::transcribe ("auto" for the detected key).
+    void convertMelodyToMidi(te::WaveAudioClip* clip, const QString& snapScale = {});
 
     OpenDawApplication& app_;
     EditManager& editMgr_;

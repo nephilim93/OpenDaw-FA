@@ -302,7 +302,7 @@ void HumRecorder::takeRecorded(const QList<te::Clip*>& clips)
         auto* edit = editMgr_.edit();
         if (!edit) return;
         if (auto* clip = dynamic_cast<te::WaveAudioClip*>(te::findClipForID(*edit, clipId)))
-            emit editMgr_.melodyConversionRequested(clip);
+            emit editMgr_.humTakeRecorded(clip);
     });
 }
 

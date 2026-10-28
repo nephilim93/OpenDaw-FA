@@ -968,7 +968,9 @@ void MainWindow::createDocks()
     mixerDock_->raise();
 
     connect(&editMgr_, &EditManager::melodyConversionRequested,
-            this, &MainWindow::convertMelodyToMidi);
+            this, [this](te::WaveAudioClip* clip) { convertMelodyToMidi(clip); });
+    connect(&editMgr_, &EditManager::humTakeRecorded,
+            this, [this](te::WaveAudioClip* clip) { convertMelodyToMidi(clip, "auto"); });
 
     connect(&editMgr_, &EditManager::midiClipDoubleClicked,
             this, &MainWindow::onMidiClipDoubleClicked);
@@ -1393,7 +1395,7 @@ void MainWindow::showModularEditor(te::AudioTrack* track)
     modularDock_->raise();
 }
 
-void MainWindow::convertMelodyToMidi(te::WaveAudioClip* clip)
+void MainWindow::convertMelodyToMidi(te::WaveAudioClip* clip, const QString& snapScale)
 {
     auto* edit = editMgr_.edit();
     auto* track = clip ? dynamic_cast<te::AudioTrack*>(clip->getTrack()) : nullptr;
@@ -1413,14 +1415,16 @@ void MainWindow::convertMelodyToMidi(te::WaveAudioClip* clip)
         aiDock_->raise();
         aiChatWidget_->submitPrompt(
             QString("Convert the melody I hummed in the audio clip \"%1\" (track %2, \"%3\", clip_index %4) "
-                    "to MIDI with transcribe_melody, then clean it up.")
-                .arg(clipName).arg(trackIndex).arg(trackName).arg(clipIndex));
+                    "to MIDI with transcribe_melody%5, then clean it up.")
+                .arg(clipName).arg(trackIndex).arg(trackName).arg(clipIndex)
+                .arg(snapScale.isEmpty() ? QString()
+                                         : QString(" (snap_to_scale \"%1\": I recorded it with the Hum button)").arg(snapScale)));
         return;
     }
 
     // No assistant set up: the raw transcription, and how to get the cleanup.
     QString error;
-    const auto converted = MelodyToMidi::convert(editMgr_, *clip, {}, "Convert to MIDI (Melody)", &error);
+    const auto converted = MelodyToMidi::convert(editMgr_, *clip, {}, "Convert to MIDI (Melody)", &error, snapScale);
     if (!converted) {
         QMessageBox::information(this, "Convert to MIDI", error);
         return;
@@ -1428,10 +1432,13 @@ void MainWindow::convertMelodyToMidi(te::WaveAudioClip* clip)
     emit editMgr_.tracksChanged();
     const auto& r = converted->transcription.result;
     QMessageBox::information(this, "Convert to MIDI",
-        QString("%1 notes, about %2, on the new track \"%3\".\n\nSet up the assistant (Settings > AI) and it "
+        QString("%1 notes, %2, on the new track \"%3\".\n\nSet up the assistant (Settings > AI) and it "
                 "will also clean the notes up: wrong notes, timing and key.")
             .arg(r.notes.size())
-            .arg(QString::fromStdString(Melody::keyName(r.keyTonic, r.keyMinor)))
+            .arg(converted->transcription.snappedTo.isEmpty()
+                     ? "about " + QString::fromStdString(Melody::keyName(r.keyTonic, r.keyMinor))
+                     : QString("snapped to %1 (%2 moved)").arg(converted->transcription.snappedTo)
+                           .arg(converted->transcription.snapped.size()))
             .arg(QString::fromUtf8(converted->track->getName().toRawUTF8())));
 }
 

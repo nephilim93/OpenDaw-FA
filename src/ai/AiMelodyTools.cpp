@@ -3,6 +3,7 @@
 #include "engine/EditManager.h"
 #include "engine/MelodyToMidi.h"
 #include <QJsonArray>
+#include <map>
 #include <cmath>
 
 // AI tools for melodies hummed, sung or whistled into an audio clip: the
@@ -50,6 +51,9 @@ QJsonArray AiToolDefs::melodyTools()
         { "transpose", QJsonObject{ { "type", "integer" }, { "minimum", -36 }, { "maximum", 36 },
                                     { "description", "Semitones added to every note (default 0)." } } },
         { "auto_octave", propOf("boolean", "Bring a whistle (above C6) or a very low hum (below C2) into range by octaves (default true).") },
+        { "snap_to_scale", propOf("string", "Move notes outside a scale to the nearest scale note: \"auto\" for the "
+                                            "detected key, or a scale such as \"A minor\", \"D dorian\", \"C minor pentatonic\". "
+                                            "Omit to keep the notes as sung.") },
     };
     tools.append(QJsonObject{
         { "name", "transcribe_melody" },
@@ -82,7 +86,8 @@ void AiToolExecutor::registerMelodyHandlers()
         options.transpose = std::clamp(input["transpose"].toInt(0), -36, 36);
         options.autoOctave = input["auto_octave"].toBool(true);
         QString error;
-        auto converted = MelodyToMidi::convert(*editMgr_, *audio, options, "AI: Transcribe Melody", &error);
+        const QString snap = input["snap_to_scale"].toString();
+        auto converted = MelodyToMidi::convert(*editMgr_, *audio, options, "AI: Transcribe Melody", &error, snap);
         if (!converted) return err(id, error + " Nothing was changed.");
 
         auto& edit = *editMgr_->edit();
@@ -90,6 +95,8 @@ void AiToolExecutor::registerMelodyHandlers()
         const double clipStart = converted->transcription.clipStartSeconds;
         const double startBeat = MelodyToMidi::toBeats(edit, clipStart);
         QJsonArray notes, low;
+        std::map<int, int> snappedFrom;
+        for (const auto& m : converted->transcription.snapped) snappedFrom[m.index] = m.fromPitch;
         for (size_t i = 0; i < r.notes.size(); ++i) {
             const auto& n = r.notes[i];
             const double a = MelodyToMidi::toBeats(edit, clipStart + n.startSeconds) - startBeat;
@@ -98,6 +105,11 @@ void AiToolExecutor::registerMelodyHandlers()
                                       { "start_beat", round3(a) }, { "length_beats", round3(b - a) },
                                       { "velocity", n.velocity }, { "confidence", round3(n.confidence) },
                                       { "cents", int(std::lround(n.cents)) } });
+            if (auto it = snappedFrom.find(int(i)); it != snappedFrom.end()) {
+                auto o = notes.last().toObject();
+                o["snapped_from"] = noteName(it->second);
+                notes.replace(notes.size() - 1, o);
+            }
             if (n.confidence < kLowConfidence) low.append(int(i));
         }
 
@@ -121,6 +133,10 @@ void AiToolExecutor::registerMelodyHandlers()
             { "notes", notes },
         };
         if (!low.isEmpty()) out["low_confidence"] = low;
+        if (!converted->transcription.snappedTo.isEmpty()) {
+            out["snapped_to"] = converted->transcription.snappedTo;
+            out["snapped_count"] = int(converted->transcription.snapped.size());
+        }
         if (!converted->transcription.warnings.isEmpty())
             out["warnings"] = QJsonArray::fromStringList(converted->transcription.warnings);
         emitTracksChanged();
