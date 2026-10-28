@@ -39,8 +39,27 @@ std::optional<Transcription> transcribe(te::WaveAudioClip& clip, const Melody::O
 // an error when the scale isn't understood.
 QString snapToScale(Melody::Result& result, const QString& scale, std::vector<SnapMove>* moved, QString* error);
 
+// Timing of the notes on the project's grid.
+enum class TempoMode {
+    Keep,   // as sung, on the project's grid as it is
+    Fit,    // the sung beats onto the project's beats (the project tempo stays)
+    Set,    // the project tempo becomes the sung one; the take moves to start on a bar
+    Auto,   // Set when this take is all the project has, else Fit
+};
+struct Timing {
+    TempoMode tempo = TempoMode::Keep;
+    double quantizeBeats = 0.0;   // 0: off; 0.5: eighths; 0.25: sixteenths
+};
+// The weakest detected tempo that Fit and Set still trust.
+inline constexpr double kMinTempoConfidence = 0.4;
+
 struct Converted {
     Transcription transcription;
+    Melody::Tempo detected;     // the sung tempo
+    TempoMode applied = TempoMode::Keep;   // what was done (Auto resolved; Keep when the tempo was unclear)
+    double projectBpm = 0.0;    // after
+    double clipStartBeat = 0.0;  // where the MIDI clip starts
+    std::vector<std::pair<double, double>> noteBeats;   // each note's start and end, in beats from the clip start
     te::AudioTrack* track = nullptr;   // the new MIDI track
     te::MidiClip* clip = nullptr;
     int clipIndex = 0;
@@ -50,7 +69,8 @@ struct Converted {
 // it plays at once), at the audio clip's place, as one undo step named
 // undoName. Nothing changes when no notes were found (the error says why).
 std::optional<Converted> convert(EditManager& editMgr, te::WaveAudioClip& clip, const Melody::Options& options,
-                                 const juce::String& undoName, QString* error, const QString& snapScale = {});
+                                 const juce::String& undoName, QString* error, const QString& snapScale = {},
+                                 const Timing& timing = {});
 
 // A note's place on the beat grid.
 double toBeats(te::Edit& edit, double seconds);

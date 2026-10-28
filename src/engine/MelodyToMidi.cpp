@@ -93,7 +93,8 @@ std::optional<Transcription> transcribe(te::WaveAudioClip& clip, const Melody::O
 }
 
 std::optional<Converted> convert(EditManager& editMgr, te::WaveAudioClip& clip, const Melody::Options& options,
-                                 const juce::String& undoName, QString* error, const QString& snapScale)
+                                 const juce::String& undoName, QString* error, const QString& snapScale,
+                                 const Timing& timing)
 {
     auto* edit = editMgr.edit();
     if (!edit) {
@@ -111,6 +112,37 @@ std::optional<Converted> convert(EditManager& editMgr, te::WaveAudioClip& clip, 
     um.beginNewTransaction(undoName);
     Converted out;
     out.transcription = std::move(*transcription);
+    const auto& notes = out.transcription.result.notes;
+    out.detected = Melody::estimateTempo(notes);
+
+    // What to do with the tempo.
+    TempoMode mode = timing.tempo;
+    if (mode == TempoMode::Auto) {
+        bool alone = true;
+        for (auto* t : te::getAudioTracks(*edit))
+            for (auto* c : t->getClips())
+                if (c != &clip) alone = false;
+        mode = alone ? TempoMode::Set : TempoMode::Fit;
+    }
+    if (mode != TempoMode::Keep && (out.detected.bpm <= 0.0 || out.detected.confidence < kMinTempoConfidence)) {
+        out.transcription.warnings << "The tempo wasn't clear enough to use, so the timing is as sung.";
+        mode = TempoMode::Keep;
+    }
+    out.applied = mode;
+
+    if (mode == TempoMode::Set) {
+        // The project takes the sung tempo; the take moves so its first beat starts a bar.
+        editMgr.setBpm(std::round(out.detected.bpm * 10.0) / 10.0);
+        const double bar = 60.0 / editMgr.getBpm() * edit->tempoSequence.getTimeSigAt(tracktion::TimePosition()).numerator.get();
+        const double beatAt = out.transcription.clipStartSeconds + out.detected.firstBeatSeconds;
+        double target = std::round(beatAt / bar) * bar;
+        if (out.transcription.clipStartSeconds + (target - beatAt) < 0.0) target += bar;
+        const double shift = target - beatAt;
+        clip.setStart(tracktion::TimePosition::fromSeconds(out.transcription.clipStartSeconds + shift), false, true);
+        out.transcription.clipStartSeconds += shift;
+    }
+    out.projectBpm = editMgr.getBpm();
+
     out.track = editMgr.addMidiTrack();
     if (!out.track) {
         *error = "Could not add a MIDI track.";
@@ -120,21 +152,50 @@ std::optional<Converted> convert(EditManager& editMgr, te::WaveAudioClip& clip, 
     out.track->setName(trackName + " Melody");
     editMgr.setTrackModularSynth(*out.track);
 
+    // Each note's start and end on the project's beats.
     const double clipStart = out.transcription.clipStartSeconds;
-    const double startBeat = toBeats(*edit, clipStart);
-    const double endBeat = toBeats(*edit, clipStart + out.transcription.clipLengthSeconds);
+    std::vector<std::pair<double, double>> beats;
+    if (mode == TempoMode::Fit) {
+        const double sungBeat = 60.0 / out.detected.bpm;
+        const double anchor = std::round(toBeats(*edit, clipStart + out.detected.firstBeatSeconds));
+        for (const auto& n : notes)
+            beats.push_back({ anchor + (n.startSeconds - out.detected.firstBeatSeconds) / sungBeat,
+                              anchor + (n.endSeconds - out.detected.firstBeatSeconds) / sungBeat });
+    } else {
+        for (const auto& n : notes)
+            beats.push_back({ toBeats(*edit, clipStart + n.startSeconds), toBeats(*edit, clipStart + n.endSeconds) });
+    }
+    if (timing.quantizeBeats > 0.0) {
+        const double q = timing.quantizeBeats;
+        for (size_t i = 0; i < beats.size(); ++i) {
+            auto& [a, b] = beats[i];
+            a = std::round(a / q) * q;
+            b = std::max(a + q, std::round(b / q) * q);
+            if (i > 0) beats[i - 1].second = std::min(beats[i - 1].second, a);   // no overlaps
+        }
+    }
+
+    double startBeat = std::floor(toBeats(*edit, clipStart) + 1.0e-6);
+    double endBeat = toBeats(*edit, clipStart + out.transcription.clipLengthSeconds);
+    for (const auto& [a, b] : beats) {
+        startBeat = std::min(startBeat, std::floor(a));
+        endBeat = std::max(endBeat, b);
+    }
+    if (mode == TempoMode::Keep && timing.quantizeBeats <= 0.0)
+        startBeat = toBeats(*edit, clipStart);   // as before: the clip where the audio is
     out.clip = editMgr.addMidiClipToTrack(*out.track, startBeat, std::max(0.25, endBeat - startBeat));
     if (!out.clip) {
         *error = "Could not add a MIDI clip.";
         return std::nullopt;
     }
     out.clip->setName(clip.getName() + " (melody)");
+    out.clipStartBeat = startBeat;
     auto& seq = out.clip->getSequence();
-    for (const auto& n : out.transcription.result.notes) {
-        const double a = toBeats(*edit, clipStart + n.startSeconds) - startBeat;
-        const double b = toBeats(*edit, clipStart + n.endSeconds) - startBeat;
-        seq.addNote(n.pitch, tracktion::BeatPosition::fromBeats(std::max(0.0, a)),
-                    tracktion::BeatDuration::fromBeats(std::max(1.0 / 64.0, b - a)), n.velocity, 0, &um);
+    for (size_t i = 0; i < notes.size(); ++i) {
+        const double a = beats[i].first - startBeat, b = beats[i].second - startBeat;
+        out.noteBeats.push_back({ std::max(0.0, a), std::max(a + 1.0 / 64.0, b) });
+        seq.addNote(notes[i].pitch, tracktion::BeatPosition::fromBeats(std::max(0.0, a)),
+                    tracktion::BeatDuration::fromBeats(std::max(1.0 / 64.0, b - a)), notes[i].velocity, 0, &um);
     }
     for (auto* c : out.track->getClips()) {
         if (c == out.clip) break;

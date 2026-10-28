@@ -53,6 +53,17 @@ Result transcribe(const std::vector<float>& mono, double sampleRate, const Optio
 // silence, breath or whispers. No tuning correction or octave shift.
 Frame detectPitch(const std::vector<float>& recent, double sampleRate, const Options& options = {});
 
+// The tempo a melody was sung at, from where its notes start: the beat
+// length that best lines the onsets up on beats and eighths, refined by a
+// least-squares fit. Tempos are kept in minBpm..maxBpm; between a tempo and
+// its double, the one nearer ~110 BPM wins when both fit equally.
+struct Tempo {
+    double bpm = 0.0;               // 0: too few notes to tell
+    double firstBeatSeconds = 0.0;  // a beat, at or before the first note
+    double confidence = 0.0;        // 0..1, how well the onsets sit on the grid
+};
+Tempo estimateTempo(const std::vector<Note>& notes, double minBpm = 60.0, double maxBpm = 180.0);
+
 // "A minor", "C# major".
 std::string keyName(int tonic, bool minor);
 

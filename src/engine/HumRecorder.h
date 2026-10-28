@@ -50,7 +50,19 @@ private:
 class HumRecorder : public QObject {
     Q_OBJECT
 public:
-    enum class State { Idle, CountIn, Recording };
+    enum class State { Idle, CountIn, Waiting, Recording };
+    // How a take starts: after a count-in (on the click, at the project
+    // tempo), or as soon as the voice is louder than a threshold (free tempo,
+    // like a sampler).
+    enum class StartMode { CountIn, Threshold };
+
+    // Saved in the settings.
+    static StartMode startMode();
+    static void setStartMode(StartMode mode);
+    static double thresholdDb();
+    static void setThresholdDb(double db);
+    // Trimmed off before the first sound in Threshold mode.
+    static constexpr double kPreRollSeconds = 0.15;
 
     explicit HumRecorder(EditManager& editMgr, QObject* parent = nullptr);
     ~HumRecorder() override;
@@ -67,12 +79,14 @@ public:
     te::AudioTrack* prepareTrack(QString* error);
     // A recorded clip arrived: converts it when it is the hum take.
     void takeRecorded(const QList<te::Clip*>& clips);
+    // Threshold mode, for tests: the voice was heard at this transport time.
+    void soundDetected(double transportSeconds);
 
     static QString noteName(double hz);   // "A4 +12¢"
 
 signals:
     void stateChanged(OpenDaw::HumRecorder::State state);
-    // "Count-in 3", "A4 +12¢", "…" (no pitch), or empty when idle.
+    // "Count-in 3", "Waiting -42 dB", "A4 +12¢", "…" (no pitch), or empty when idle.
     void readoutChanged(const QString& text);
     void failed(const QString& message);
 
@@ -89,6 +103,8 @@ private:
     std::map<uint64_t, bool> armedBefore_;   // track id -> armed
     std::optional<te::Edit::CountIn> countInBefore_;
     double startSeconds_ = 0.0;
+    StartMode mode_ = StartMode::CountIn;   // of the take in progress
+    std::optional<double> onsetSeconds_;    // Threshold: when the voice came in
     QString lastReadout_;
 };
 

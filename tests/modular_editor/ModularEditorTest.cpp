@@ -740,6 +740,109 @@ int main(int argc, char** argv)
             EXPECT(flat["notes"].toArray().size() == 3 && flat["notes"].toArray()[1].toObject()["note"].toInt() == 70);
         }
 
+        // ── The sung tempo: fit to the project, or set the project to it ──
+        std::printf("sung tempo\n");
+        {
+            // Hummed at 90 BPM (the project is at 120), starting 0.6 s into the file.
+            const double sungBeat = 60.0 / 90.0;
+            const double at[] = { 0, 1, 2, 2.5, 3, 4, 5, 5.5, 6, 7 };
+            const int pitch[] = { 62, 64, 66, 67, 69, 67, 66, 64, 62, 62 };
+            const double len = 0.6 + 8.5 * sungBeat;
+            juce::AudioBuffer<float> take(1, int(sr * len));
+            take.clear();
+            double ph = 0.0;
+            for (int k = 0; k < 10; ++k) {
+                const double hz = 440.0 * std::pow(2.0, (pitch[k] - 69) / 12.0);
+                const double next = k + 1 < 10 ? at[k + 1] : at[k] + 1.0;
+                const int a = int((0.6 + at[k] * sungBeat) * sr), b = int((0.6 + next * sungBeat - 0.08) * sr);
+                for (int i = a; i < b; ++i) {
+                    ph += 2.0 * juce::MathConstants<double>::pi * hz / sr;
+                    const double env = std::min({ 1.0, (i - a) / (0.01 * sr), (b - i) / (0.02 * sr) });
+                    double v = 0.0;
+                    for (int h = 1; h <= 8; ++h) v += std::sin(h * ph) / h;
+                    take.setSample(0, i, float(0.15 * env * v));
+                }
+            }
+            const auto file = juce::File::getSpecialLocation(juce::File::tempDirectory).getChildFile("opendaw_hum90_test.wav");
+            file.deleteFile();
+            {
+                juce::WavAudioFormat format;
+                std::unique_ptr<juce::OutputStream> stream(file.createOutputStream().release());
+                std::unique_ptr<juce::AudioFormatWriter> writer(format.createWriterFor(stream.get(), sr, 1, 16, {}, 0));
+                if (writer) { stream.release(); writer->writeFromAudioSampleBuffer(take, 0, take.getNumSamples()); }
+            }
+            auto* sung = editMgr.addAudioTrack();
+            sung->setName("Sung90");
+            editMgr.addAudioClipToTrack(*sung, file, 8.3);   // a little after bar 3
+            auto run = [&](QJsonObject extra) {
+                QJsonObject in{ { "track", "Sung90" }, { "clip_index", 0 } };
+                for (auto it = extra.begin(); it != extra.end(); ++it) in[it.key()] = it.value();
+                const auto r = tools.execute(AiToolCall{ "t", "transcribe_melody", in });
+                if (r.isError) std::printf("    (error: %s)\n", r.content.toUtf8().constData());
+                return QJsonDocument::fromJson(r.content.toUtf8()).object();
+            };
+            auto lastMelody = [&]() {
+                auto* t = te::getAudioTracks(*editMgr.edit()).getLast();
+                return t ? dynamic_cast<te::MidiClip*>(t->getClips().getFirst()) : nullptr;
+            };
+            auto absBeat = [](te::MidiClip* c, int i) {
+                return c->getStartBeat().inBeats() + c->getSequence().getNote(i)->getStartBeat().inBeats();
+            };
+
+            // keep: the timing as sung, but the sung tempo is reported.
+            const auto kept = run({});
+            EXPECT(std::abs(kept["sung_tempo_bpm"].toDouble() - 90.0) < 1.5 && kept["tempo_applied"] == "keep");
+
+            // fit: each sung beat becomes a project beat, from the beat nearest the first note.
+            const auto fit = run({ { "tempo", "fit" }, { "quantize", "1/8" } });
+            EXPECT(fit["tempo_applied"] == "fit" && std::abs(editMgr.getBpm() - 120.0) < 1.0e-6);
+            auto* fitted = lastMelody();
+            EXPECT(fitted && fitted->getSequence().getNumNotes() == 10);
+            if (fitted && fitted->getSequence().getNumNotes() == 10) {
+                // 8.3 beats + 0.6 s (1.2 beats at 120) = 9.5: the nearest beat is 9 or 10.
+                const double first = absBeat(fitted, 0);
+                EXPECT(std::abs(first - std::round(first)) < 1.0e-6 && (first == 9.0 || first == 10.0));
+                bool onGrid = true;
+                for (int i = 0; i < 10; ++i)
+                    if (std::abs(absBeat(fitted, i) - (first + at[i])) > 1.0e-6) onGrid = false;
+                EXPECT(onGrid);
+                EXPECT(std::abs(fit["notes"].toArray()[3].toObject()["start_beat"].toDouble()
+                                - (first + 2.5 - fit["clip_start_beat"].toDouble())) < 1.0e-3);
+            }
+            // auto with other material in the project: fit.
+            EXPECT(run({ { "tempo", "auto" } })["tempo_applied"] == "fit");
+
+            // set: the project takes 90 BPM; the take moves so its first beat starts a bar. One undo puts it all back.
+            auto* audio = sung->getClips().getFirst();
+            const double before = audio->getPosition().getStart().inSeconds();
+            const auto set = run({ { "tempo", "set" }, { "quantize", "1/16" } });
+            EXPECT(set["tempo_applied"] == "set" && std::abs(editMgr.getBpm() - 90.0) < 1.5);
+            auto* setClip = lastMelody();
+            if (setClip && setClip->getSequence().getNumNotes() == 10) {
+                const double first = absBeat(setClip, 0);
+                EXPECT(std::abs(std::remainder(first, 4.0)) < 1.0e-6);   // on a bar
+                bool onBeats = true;
+                for (int i = 0; i < 10; ++i)
+                    if (std::abs(absBeat(setClip, i) - (first + at[i])) > 0.13) onBeats = false;
+                EXPECT(onBeats);
+            }
+            EXPECT(audio->getPosition().getStart().inSeconds() != before);
+            editMgr.undo();
+            settle();
+            EXPECT(std::abs(editMgr.getBpm() - 120.0) < 1.0e-6);
+            EXPECT(std::abs(audio->getPosition().getStart().inSeconds() - before) < 1.0e-6);
+
+            // A take without a clear beat keeps its timing, and says so.
+            EXPECT(run({ { "tempo", "fit" }, { "quantize", "off" } })["tempo_applied"] == "fit");
+            const auto badTempo = tools.execute(AiToolCall{ "t2", "transcribe_melody",
+                QJsonObject{ { "track", "Sung90" }, { "clip_index", 0 }, { "tempo", "faster" } } });
+            EXPECT(badTempo.isError && badTempo.content.contains("keep, fit, set or auto"));
+            const auto unclear = run({ { "track", "Hum" }, { "tempo", "fit" } });   // G A G: three notes
+            EXPECT(unclear["tempo_applied"] == "keep" && unclear["warnings"].toString().isEmpty()
+                   && QJsonDocument(unclear).toJson().contains("tempo wasn't clear"));
+            file.deleteFile();
+        }
+
         // ── The Hum button: track set-up, and the take goes to Convert to MIDI ──
         std::printf("hum recorder\n");
         EXPECT(HumRecorder::noteName(440.0) == "A4");
@@ -823,6 +926,49 @@ int main(int argc, char** argv)
                 EXPECT(input->isRecordingEnabled(mine->itemID) && !input->isRecordingEnabled(fresh->itemID));
                 EXPECT(readouts.size() >= 3 && readouts.first() == "Count-in 4" && readouts.last().isEmpty());
                 if (converted) converted->getSourceFileReference().getFile().deleteFile();
+
+                // Threshold: recording starts at once and waits for the voice; no count-in.
+                bool freeTempo = false;
+                QObject::connect(&editMgr, &EditManager::humTakeRecorded, &hum,
+                                 [&](te::WaveAudioClip*, bool free) { freeTempo = free; });
+                HumRecorder::setStartMode(HumRecorder::StartMode::Threshold);
+                // As high as it goes: a room's own noise mustn't start the take here.
+                HumRecorder::setThresholdDb(-6.0);
+                edit->setCountInMode(te::Edit::CountIn::twoBar);   // the user's own count-in is set aside...
+                converted = nullptr;
+                readouts.clear();
+                EXPECT(hum.start(&error));
+                EXPECT(hum.state() == HumRecorder::State::Waiting && edit->getCountInMode() == te::Edit::CountIn::none);
+                settle(400);
+                EXPECT(!readouts.isEmpty() && readouts.last().startsWith("Waiting"));
+                // Stopped before a sound: nothing is kept or converted.
+                const int clipsBefore = fresh->getClips().size();
+                hum.stop();
+                settle(300);
+                EXPECT(hum.state() == HumRecorder::State::Idle && converted == nullptr);
+                EXPECT(fresh->getClips().size() == clipsBefore);
+                EXPECT(edit->getCountInMode() == te::Edit::CountIn::twoBar);   // ...and comes back
+
+                // The voice comes in 0.5 s after the start: the take is trimmed to just before it.
+                EXPECT(hum.start(&error));
+                const double began = edit->getTransport().getPosition().inSeconds();
+                settle(500);
+                const double heard = edit->getTransport().getPosition().inSeconds();
+                hum.soundDetected(heard);
+                EXPECT(hum.state() == HumRecorder::State::Recording);
+                settle(500);
+                hum.stop();
+                settle(300);
+                EXPECT(converted != nullptr && freeTempo);
+                if (converted) {
+                    const double start = converted->getPosition().getStart().inSeconds();
+                    EXPECT(std::abs(start - (heard - HumRecorder::kPreRollSeconds)) < 0.02 && start > began + 0.2);
+                    // Still in sync: the audio under the clip didn't move.
+                    EXPECT(std::abs(converted->getPosition().getOffset().inSeconds() - (start - began)) < 0.05);
+                    converted->getSourceFileReference().getFile().deleteFile();
+                }
+                HumRecorder::setStartMode(HumRecorder::StartMode::CountIn);
+                edit->setCountInMode(te::Edit::CountIn::none);
             }
         }
 

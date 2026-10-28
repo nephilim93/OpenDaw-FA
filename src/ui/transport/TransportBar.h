@@ -30,6 +30,8 @@ private slots:
     void onStop();
     void onRecord();
     void onHum();
+    void showHumModeMenu();
+    void updateHumModeButton();
     void onLoop();
     void onMetronome();
     void onCountIn();
@@ -51,6 +53,7 @@ private:
     QPushButton* stopBtn_;
     QPushButton* recordBtn_;
     QPushButton* humBtn_;
+    QPushButton* humModeBtn_;
     QLabel*      humLabel_;
     HumRecorder* hum_;
     QPushButton* loopBtn_;

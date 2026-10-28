@@ -4,6 +4,8 @@
 #include "utils/IconFont.h"
 #include <QDialog>
 #include <QMessageBox>
+#include <QMenu>
+#include <QActionGroup>
 #include <QSettings>
 #include <QVBoxLayout>
 #include <cmath>
@@ -47,6 +49,10 @@ TransportBar::TransportBar(EditManager* editMgr, QWidget* parent)
     humBtn_    = makeTransportBtn(icons::fa::Microphone, "Hum to MIDI", theme.transportRecord, true);
     humBtn_->setToolTip("Hum to MIDI — sing, hum or whistle after the count-in; "
                         "press again to stop and turn it into notes");
+    humModeBtn_ = makeTransportBtn(icons::fa::Metronome, "Hum Start Mode", theme.accent);
+    humModeBtn_->setFixedWidth(26);
+    connect(humModeBtn_, &QPushButton::clicked, this, &TransportBar::showHumModeMenu);
+    updateHumModeButton();
     humLabel_ = new QLabel(this);
     humLabel_->setAccessibleName("Hum Pitch");
     humLabel_->setFixedWidth(84);
@@ -163,6 +169,7 @@ TransportBar::TransportBar(EditManager* editMgr, QWidget* parent)
     layout->addWidget(playBtn_);
     layout->addWidget(recordBtn_);
     layout->addWidget(humBtn_);
+    layout->addWidget(humModeBtn_);
     layout->addWidget(humLabel_);
     layout->addWidget(loopBtn_);
     layout->addWidget(metronomeBtn_);
@@ -386,6 +393,49 @@ void TransportBar::onHum()
         if (!error.isEmpty())
             QMessageBox::information(window(), "Hum to MIDI", error);
     }
+}
+
+void TransportBar::updateHumModeButton()
+{
+    const bool threshold = HumRecorder::startMode() == HumRecorder::StartMode::Threshold;
+    humModeBtn_->setText(QString(threshold ? icons::fa::Waveform : icons::fa::Metronome));
+    humModeBtn_->setToolTip(threshold
+        ? QString("Hum starts on your voice (louder than %1 dB), at your own tempo — click to change")
+              .arg(int(HumRecorder::thresholdDb()))
+        : QString("Hum starts after a count-in, on the click — click to change"));
+}
+
+void TransportBar::showHumModeMenu()
+{
+    QMenu menu(this);
+    auto* group = new QActionGroup(&menu);
+    const bool threshold = HumRecorder::startMode() == HumRecorder::StartMode::Threshold;
+    auto* countIn = menu.addAction("Count-in (on the click)");
+    auto* onVoice = menu.addAction("Threshold (starts on your voice, your own tempo)");
+    for (auto* a : { countIn, onVoice }) { a->setCheckable(true); group->addAction(a); }
+    (threshold ? onVoice : countIn)->setChecked(true);
+    connect(countIn, &QAction::triggered, this, [this] {
+        HumRecorder::setStartMode(HumRecorder::StartMode::CountIn);
+        updateHumModeButton();
+    });
+    connect(onVoice, &QAction::triggered, this, [this] {
+        HumRecorder::setStartMode(HumRecorder::StartMode::Threshold);
+        updateHumModeButton();
+    });
+    auto* levels = menu.addMenu("Threshold level");
+    auto* levelGroup = new QActionGroup(levels);
+    for (int db : { -50, -45, -40, -35, -30, -25, -20, -15 }) {
+        auto* a = levels->addAction(QString("%1 dB%2").arg(db).arg(db == -50 ? "  (quiet room, soft voice)"
+                                                               : db == -20 ? "  (noisy room)" : ""));
+        a->setCheckable(true);
+        a->setChecked(int(HumRecorder::thresholdDb()) == db);
+        levelGroup->addAction(a);
+        connect(a, &QAction::triggered, this, [this, db] {
+            HumRecorder::setThresholdDb(db);
+            updateHumModeButton();
+        });
+    }
+    menu.exec(humModeBtn_->mapToGlobal(QPoint(0, humModeBtn_->height())));
 }
 
 void TransportBar::onLoop()

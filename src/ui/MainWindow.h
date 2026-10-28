@@ -82,8 +82,10 @@ private:
     void showModularEditor(te::AudioTrack* track);
     void showDrumsView(te::AudioTrack* track);
     // An audio clip's hummed melody to MIDI: by the assistant when it's set up.
-    // snapScale: as MelodyToMidi::transcribe ("auto" for the detected key).
-    void convertMelodyToMidi(te::WaveAudioClip* clip, const QString& snapScale = {});
+    // A take from the Hum button snaps to the detected key and is quantized;
+    // a free-tempo one (threshold start) also gets its tempo detected and used.
+    enum class MelodySource { ClipMenu, HumOnClick, HumFreeTempo };
+    void convertMelodyToMidi(te::WaveAudioClip* clip, MelodySource source = MelodySource::ClipMenu);
 
     OpenDawApplication& app_;
     EditManager& editMgr_;

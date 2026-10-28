@@ -969,8 +969,9 @@ void MainWindow::createDocks()
 
     connect(&editMgr_, &EditManager::melodyConversionRequested,
             this, [this](te::WaveAudioClip* clip) { convertMelodyToMidi(clip); });
-    connect(&editMgr_, &EditManager::humTakeRecorded,
-            this, [this](te::WaveAudioClip* clip) { convertMelodyToMidi(clip, "auto"); });
+    connect(&editMgr_, &EditManager::humTakeRecorded, this, [this](te::WaveAudioClip* clip, bool freeTempo) {
+        convertMelodyToMidi(clip, freeTempo ? MelodySource::HumFreeTempo : MelodySource::HumOnClick);
+    });
 
     connect(&editMgr_, &EditManager::midiClipDoubleClicked,
             this, &MainWindow::onMidiClipDoubleClicked);
@@ -1395,7 +1396,7 @@ void MainWindow::showModularEditor(te::AudioTrack* track)
     modularDock_->raise();
 }
 
-void MainWindow::convertMelodyToMidi(te::WaveAudioClip* clip, const QString& snapScale)
+void MainWindow::convertMelodyToMidi(te::WaveAudioClip* clip, MelodySource source)
 {
     auto* edit = editMgr_.edit();
     auto* track = clip ? dynamic_cast<te::AudioTrack*>(clip->getTrack()) : nullptr;
@@ -1417,14 +1418,23 @@ void MainWindow::convertMelodyToMidi(te::WaveAudioClip* clip, const QString& sna
             QString("Convert the melody I hummed in the audio clip \"%1\" (track %2, \"%3\", clip_index %4) "
                     "to MIDI with transcribe_melody%5, then clean it up.")
                 .arg(clipName).arg(trackIndex).arg(trackName).arg(clipIndex)
-                .arg(snapScale.isEmpty() ? QString()
-                                         : QString(" (snap_to_scale \"%1\": I recorded it with the Hum button)").arg(snapScale)));
+                .arg(source == MelodySource::ClipMenu ? QString()
+                     : source == MelodySource::HumOnClick
+                         ? QString(" (I recorded it with the Hum button on the click: snap_to_scale \"auto\", "
+                                   "tempo \"keep\", quantize \"1/16\" unless the rhythm calls for 1/8)")
+                         : QString(" (I hummed it at my own tempo with the Hum button: snap_to_scale \"auto\", "
+                                   "tempo \"auto\", quantize \"1/16\" unless the rhythm calls for 1/8; tell me "
+                                   "the tempo you found and whether you set the project to it or fit the melody)")));
         return;
     }
 
     // No assistant set up: the raw transcription, and how to get the cleanup.
     QString error;
-    const auto converted = MelodyToMidi::convert(editMgr_, *clip, {}, "Convert to MIDI (Melody)", &error, snapScale);
+    MelodyToMidi::Timing timing;
+    if (source != MelodySource::ClipMenu) timing.quantizeBeats = 0.25;
+    if (source == MelodySource::HumFreeTempo) timing.tempo = MelodyToMidi::TempoMode::Auto;
+    const auto converted = MelodyToMidi::convert(editMgr_, *clip, {}, "Convert to MIDI (Melody)", &error,
+                                                 source == MelodySource::ClipMenu ? QString() : QString("auto"), timing);
     if (!converted) {
         QMessageBox::information(this, "Convert to MIDI", error);
         return;
@@ -1432,14 +1442,20 @@ void MainWindow::convertMelodyToMidi(te::WaveAudioClip* clip, const QString& sna
     emit editMgr_.tracksChanged();
     const auto& r = converted->transcription.result;
     QMessageBox::information(this, "Convert to MIDI",
-        QString("%1 notes, %2, on the new track \"%3\".\n\nSet up the assistant (Settings > AI) and it "
+        QString("%1 notes, %2, on the new track \"%3\".%4\n\nSet up the assistant (Settings > AI) and it "
                 "will also clean the notes up: wrong notes, timing and key.")
             .arg(r.notes.size())
             .arg(converted->transcription.snappedTo.isEmpty()
                      ? "about " + QString::fromStdString(Melody::keyName(r.keyTonic, r.keyMinor))
                      : QString("snapped to %1 (%2 moved)").arg(converted->transcription.snappedTo)
                            .arg(converted->transcription.snapped.size()))
-            .arg(QString::fromUtf8(converted->track->getName().toRawUTF8())));
+            .arg(QString::fromUtf8(converted->track->getName().toRawUTF8()))
+            .arg(converted->applied == MelodyToMidi::TempoMode::Set
+                     ? QString(" The project tempo is now %1 BPM, the tempo you hummed at.").arg(converted->projectBpm, 0, 'f', 1)
+                 : converted->applied == MelodyToMidi::TempoMode::Fit
+                     ? QString(" You hummed at about %1 BPM; the melody was fitted to the project's %2 BPM.")
+                           .arg(converted->detected.bpm, 0, 'f', 0).arg(converted->projectBpm, 0, 'f', 0)
+                     : QString()));
 }
 
 void MainWindow::showDrumsView(te::AudioTrack* track)

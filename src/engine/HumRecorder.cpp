@@ -1,4 +1,5 @@
 #include "HumRecorder.h"
+#include <QSettings>
 #include <cmath>
 
 namespace OpenDaw {
@@ -90,6 +91,26 @@ Melody::Frame LivePitchMonitor::read()
 }
 
 // ── HumRecorder ──────────────────────────────────────────────────────────────
+
+HumRecorder::StartMode HumRecorder::startMode()
+{
+    return QSettings().value("hum/startMode").toString() == "threshold" ? StartMode::Threshold : StartMode::CountIn;
+}
+
+void HumRecorder::setStartMode(StartMode mode)
+{
+    QSettings().setValue("hum/startMode", mode == StartMode::Threshold ? "threshold" : "countin");
+}
+
+double HumRecorder::thresholdDb()
+{
+    return std::clamp(QSettings().value("hum/thresholdDb", -35.0).toDouble(), -60.0, -6.0);
+}
+
+void HumRecorder::setThresholdDb(double db)
+{
+    QSettings().setValue("hum/thresholdDb", std::clamp(db, -60.0, -6.0));
+}
 
 HumRecorder::HumRecorder(EditManager& editMgr, QObject* parent)
     : QObject(parent), editMgr_(editMgr)
@@ -196,11 +217,19 @@ bool HumRecorder::start(QString* error)
     auto* hum = prepareTrack(error);
     if (!hum) return false;
 
-    // A count-in, so the take starts on the beat. The user's own count-in
-    // wins; with none, one bar.
-    if (edit->getCountInMode() == te::Edit::CountIn::none) {
-        countInBefore_ = te::Edit::CountIn::none;
-        edit->setCountInMode(te::Edit::CountIn::oneBar);
+    mode_ = startMode();
+    onsetSeconds_.reset();
+    if (mode_ == StartMode::CountIn) {
+        // A count-in, so the take starts on the beat. The user's own count-in
+        // wins; with none, one bar.
+        if (edit->getCountInMode() == te::Edit::CountIn::none) {
+            countInBefore_ = te::Edit::CountIn::none;
+            edit->setCountInMode(te::Edit::CountIn::oneBar);
+        }
+    } else if (edit->getCountInMode() != te::Edit::CountIn::none) {
+        // Free tempo: recording starts at once, and the take at the first sound.
+        countInBefore_ = edit->getCountInMode();
+        edit->setCountInMode(te::Edit::CountIn::none);
     }
 
     juce::String inputName;
@@ -217,7 +246,8 @@ bool HumRecorder::start(QString* error)
         if (error) *error = "Recording didn't start. Check the audio input in Settings → Audio.";
         return false;
     }
-    setState(edit->getNumCountInBeats() > 0 ? State::CountIn : State::Recording);
+    setState(mode_ == StartMode::Threshold ? State::Waiting
+             : edit->getNumCountInBeats() > 0 ? State::CountIn : State::Recording);
     timer_.start();
     poll();
     return true;
@@ -226,9 +256,19 @@ bool HumRecorder::start(QString* error)
 void HumRecorder::stop()
 {
     if (state_ == State::Idle) return;
+    // Stopped before a sound: nothing to keep.
+    const bool discard = state_ == State::Waiting;
     if (auto* edit = editMgr_.edit())
-        edit->getTransport().stop(false, false);
+        edit->getTransport().stop(discard, false);
+    if (discard) trackId_ = {};
     poll();
+}
+
+void HumRecorder::soundDetected(double transportSeconds)
+{
+    if (state_ != State::Waiting) return;
+    onsetSeconds_ = std::max(startSeconds_, transportSeconds - kPreRollSeconds);
+    setState(State::Recording);
 }
 
 void HumRecorder::poll()
@@ -241,7 +281,18 @@ void HumRecorder::poll()
     auto& transport = edit->getTransport();
     QString text;
     const double now = transport.getPosition().inSeconds();
-    if (now < startSeconds_ - 0.01) {
+    if (state_ == State::Waiting) {
+        const auto f = monitor_ && monitor_->isRunning() ? monitor_->read() : Melody::Frame{};
+        if (f.db > thresholdDb()) {
+            // The reading covers the last ~85 ms: the voice came in about then.
+            soundDetected(now - 0.085);
+        } else {
+            text = QString("Waiting %1 dB").arg(int(std::lround(std::max(-99.0, f.db))));
+        }
+    }
+    if (state_ == State::Waiting) {
+        // The level, until the voice comes in.
+    } else if (now < startSeconds_ - 0.01) {
         setState(State::CountIn);
         auto& ts = edit->tempoSequence;
         const double beatsLeft = ts.toBeats(tracktion::TimePosition::fromSeconds(startSeconds_)).inBeats()
@@ -294,15 +345,21 @@ void HumRecorder::takeRecorded(const QList<te::Clip*>& clips)
         if (auto* w = dynamic_cast<te::WaveAudioClip*>(c); w && w->getTrack() && w->getTrack()->itemID == trackId_)
             take = w;
     if (!take) return;
+    if (onsetSeconds_ && *onsetSeconds_ > take->getPosition().getStart().inSeconds()) {
+        // Threshold: the take starts just before the first sound.
+        take->setStart(tracktion::TimePosition::fromSeconds(*onsetSeconds_), true, false);
+    }
+    const bool freeTempo = mode_ == StartMode::Threshold;
     restore();
     trackId_ = {};
+    onsetSeconds_.reset();
     // After the timeline has picked the clip up.
     const auto clipId = take->itemID;
-    QTimer::singleShot(0, this, [this, clipId]() {
+    QTimer::singleShot(0, this, [this, clipId, freeTempo]() {
         auto* edit = editMgr_.edit();
         if (!edit) return;
         if (auto* clip = dynamic_cast<te::WaveAudioClip*>(te::findClipForID(*edit, clipId)))
-            emit editMgr_.humTakeRecorded(clip);
+            emit editMgr_.humTakeRecorded(clip, freeTempo);
     });
 }
 

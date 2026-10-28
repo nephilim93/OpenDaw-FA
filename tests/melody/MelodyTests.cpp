@@ -2,6 +2,7 @@
 #include "music/MelodyTranscriber.h"
 #include <cmath>
 #include <random>
+#include <cstdio>
 
 // Hummed and whistled melodies, synthesized with known notes.
 
@@ -296,4 +297,84 @@ TEST(melody, live_pitch_reading)
     CHECK(Mel::detectPitch(std::vector<float>(far.end() - 3528 - 2205, far.end() - 2205), 44100.0).hz == 0.0);
     // Too short to measure: no pitch rather than a guess.
     CHECK(Mel::detectPitch(std::vector<float>(hum.begin() + 4410, hum.begin() + 4600), 44100.0).hz == 0.0);
+}
+
+namespace {
+// Notes at beat positions (in beats) of a tempo, with a little human timing.
+std::vector<Mel::Note> notesAt(const std::vector<double>& beats, double bpm, double startSeconds, double jitter, unsigned seed)
+{
+    std::mt19937 rng(seed);
+    std::uniform_real_distribution<double> j(-jitter, jitter);
+    std::vector<Mel::Note> out;
+    const double beat = 60.0 / bpm;
+    for (size_t i = 0; i < beats.size(); ++i) {
+        Mel::Note n;
+        n.startSeconds = startSeconds + beats[i] * beat + j(rng);
+        const double next = i + 1 < beats.size() ? beats[i + 1] : beats[i] + 1.0;
+        n.endSeconds = startSeconds + next * beat - 0.05;
+        out.push_back(n);
+    }
+    return out;
+}
+const std::vector<double> kRhythm = { 0, 1, 2, 2.5, 3, 4, 5, 5.5, 6, 7, 8, 9, 9.5, 10, 11, 12 };
+}
+
+TEST(melody, tempo_of_a_sung_phrase)
+{
+    for (double bpm : { 72.0, 96.0, 120.0, 150.0, 172.0 }) {
+        const auto t = Mel::estimateTempo(notesAt(kRhythm, bpm, 0.37, 0.015, unsigned(bpm)));
+        CHECK(std::abs(t.bpm - bpm) < 1.5);
+        // The first note is on a beat.
+        CHECK(std::abs(t.firstBeatSeconds - 0.37) < 0.03);
+        CHECK(t.confidence > 0.6);
+    }
+}
+
+TEST(melody, tempo_with_a_pickup_and_only_eighths)
+{
+    // A pickup half a beat early: the beat is still found, before the first note.
+    std::vector<double> pickup = { -0.5 };
+    for (double b : kRhythm) pickup.push_back(b);
+    const auto p = Mel::estimateTempo(notesAt(pickup, 110.0, 1.0, 0.01, 3));
+    CHECK(std::abs(p.bpm - 110.0) < 1.5);
+    const double beat = 60.0 / 110.0;
+    CHECK(p.firstBeatSeconds <= 1.0 - 0.5 * beat + 0.01);
+    CHECK(std::abs(std::remainder(p.firstBeatSeconds - 1.0, beat)) < 0.03);
+    // Running eighths at 100: 100, not 200 or 50.
+    std::vector<double> eighths;
+    for (int i = 0; i < 16; ++i) eighths.push_back(i * 0.5);
+    eighths.push_back(8.0);
+    eighths.push_back(9.0);
+    CHECK(std::abs(Mel::estimateTempo(notesAt(eighths, 100.0, 0.2, 0.01, 4)).bpm - 100.0) < 1.5);
+}
+
+TEST(melody, tempo_needs_a_rhythm)
+{
+    CHECK(Mel::estimateTempo({}).bpm == 0.0);
+    CHECK(Mel::estimateTempo(notesAt({ 0, 1, 2 }, 120.0, 0.0, 0.0, 1)).bpm == 0.0);
+    // Onsets at random: low confidence.
+    std::mt19937 rng(9);
+    std::uniform_real_distribution<double> u(0.0, 8.0);
+    std::vector<double> random;
+    for (int i = 0; i < 16; ++i) random.push_back(u(rng));
+    std::sort(random.begin(), random.end());
+    CHECK(Mel::estimateTempo(notesAt(random, 60.0, 0.0, 0.0, 2)).confidence < 0.45);
+}
+
+TEST(melody, tempo_from_a_hummed_take)
+{
+    // Sung at 104 BPM, transcribed, then timed.
+    const double beat = 60.0 / 104.0;
+    const int steps[] = { 0, 2, 4, 4, 5, 4, 2, 0, 2, 4, 0, 0 };
+    const double at[] = { 0, 1, 2, 2.5, 3, 4, 5, 5.5, 6, 7, 8, 10 };
+    std::vector<SungNote> notes;
+    for (int i = 0; i < 12; ++i) {
+        const double next = i + 1 < 12 ? at[i + 1] : at[i] + 2.0;
+        notes.push_back({ 62 + steps[i], 0.5 + at[i] * beat, 0.5 + next * beat - 0.07 });
+    }
+    const auto r = Mel::transcribe(sing(notes, Voice{}, 0.5 + 12.5 * beat), 44100.0);
+    CHECK(r.notes.size() == 12);
+    const auto t = Mel::estimateTempo(r.notes);
+    CHECK(std::abs(t.bpm - 104.0) < 1.5);
+    CHECK(std::abs(t.firstBeatSeconds - 0.5) < 0.04);
 }

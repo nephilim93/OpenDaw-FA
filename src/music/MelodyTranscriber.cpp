@@ -184,6 +184,90 @@ std::string keyName(int tonic, bool minor)
     return std::string(kNames[((tonic % 12) + 12) % 12]) + (minor ? " minor" : " major");
 }
 
+Tempo estimateTempo(const std::vector<Note>& notes, double minBpm, double maxBpm)
+{
+    Tempo out;
+    if (notes.size() < 4 || minBpm <= 0.0 || maxBpm <= minBpm) return out;
+    std::vector<double> t, w;
+    for (const auto& n : notes) {
+        t.push_back(n.startSeconds);
+        // Longer, louder notes say more about the beat than passing ones.
+        w.push_back(std::clamp((n.endSeconds - n.startSeconds) / 0.2, 0.3, 1.0) * (0.5 + n.velocity / 254.0));
+    }
+    double wsum = 0.0;
+    for (auto v : w) wsum += v;
+
+    // How well the onsets line up on a grid of this spacing (0..1), and its phase.
+    auto align = [&](double spacing, double* phase) {
+        double re = 0.0, im = 0.0;
+        for (size_t i = 0; i < t.size(); ++i) {
+            const double a = 2.0 * kPi * t[i] / spacing;
+            re += w[i] * std::cos(a);
+            im += w[i] * std::sin(a);
+        }
+        if (phase) *phase = std::atan2(im, re);
+        return std::sqrt(re * re + im * im) / wsum;
+    };
+
+    const double first = *std::min_element(t.begin(), t.end());
+    const double last = *std::max_element(t.begin(), t.end());
+    // The share of beats from the first note to the last with a note on them:
+    // double time fits the onsets as well, but leaves every other beat empty.
+    auto occupancy = [&](double beat) {
+        double phase = 0.0;
+        align(beat, &phase);
+        double origin = phase / (2.0 * kPi) * beat;
+        origin -= std::ceil((origin - first) / beat) * beat;
+        int beats = 0, hits = 0;
+        for (double b = origin; b <= last + 0.5 * beat; b += beat) {
+            if (b < first - 0.5 * beat) continue;
+            ++beats;
+            for (auto x : t)
+                if (std::abs(x - b) < 0.12 * beat) { ++hits; break; }
+        }
+        return beats > 0 ? double(hits) / beats : 0.0;
+    };
+
+    double best = -1.0, bestBpm = 0.0, bestFit = 0.0;
+    for (double bpm = minBpm; bpm <= maxBpm + 1.0e-9; bpm += 0.25) {
+        const double beat = 60.0 / bpm;
+        const double fit = (0.5 * align(beat / 2.0, nullptr) + 0.5 * align(beat, nullptr)) * occupancy(beat);
+        const double octaves = std::log2(bpm / 110.0);
+        const double score = fit * std::exp(-octaves * octaves / 2.0);
+        if (score > best) { best = score; bestBpm = bpm; bestFit = fit; }
+    }
+
+    // Refine: put each onset on its eighth, fit onset = a + b * index.
+    double beat = 60.0 / bestBpm;
+    double phase = 0.0;
+    align(beat, &phase);
+    double origin = phase / (2.0 * kPi) * beat;
+    for (int pass = 0; pass < 2; ++pass) {
+        double sw = 0, sx = 0, sy = 0, sxx = 0, sxy = 0;
+        for (size_t i = 0; i < t.size(); ++i) {
+            const double k = std::round((t[i] - origin) / (beat / 2.0));
+            sw += w[i]; sx += w[i] * k; sy += w[i] * t[i]; sxx += w[i] * k * k; sxy += w[i] * k * t[i];
+        }
+        const double den = sw * sxx - sx * sx;
+        if (std::abs(den) < 1.0e-12) break;
+        const double b = (sw * sxy - sx * sy) / den;
+        const double a = (sy - b * sx) / sw;
+        if (b <= 0.0) break;
+        beat = 2.0 * b;
+        // The beat (not the off-beat) among the two eighth phases.
+        align(beat, &phase);
+        const double beatPhase = phase / (2.0 * kPi) * beat;
+        const double k = std::round((beatPhase - a) / b);
+        origin = a + k * b;
+    }
+    // A beat at or before the first note (a note sung a little early still starts on it).
+    origin -= std::ceil((origin - first) / beat - 0.15) * beat;
+    out.bpm = std::clamp(60.0 / beat, minBpm, maxBpm);
+    out.firstBeatSeconds = origin;
+    out.confidence = std::clamp(bestFit, 0.0, 1.0);
+    return out;
+}
+
 Frame detectPitch(const std::vector<float>& recent, double sampleRate, const Options& options)
 {
     Frame f;

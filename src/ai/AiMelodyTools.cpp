@@ -51,6 +51,13 @@ QJsonArray AiToolDefs::melodyTools()
         { "transpose", QJsonObject{ { "type", "integer" }, { "minimum", -36 }, { "maximum", 36 },
                                     { "description", "Semitones added to every note (default 0)." } } },
         { "auto_octave", propOf("boolean", "Bring a whistle (above C6) or a very low hum (below C2) into range by octaves (default true).") },
+        { "tempo", QJsonObject{ { "type", "string" }, { "enum", QJsonArray{ "keep", "fit", "set", "auto" } },
+                                { "description", "The sung tempo is always detected. keep (default): timing as sung. fit: the sung beats "
+                                                 "onto the project's beats, the project tempo stays. set: the project tempo becomes the "
+                                                 "sung one and the take moves to start on a bar. auto: set when this take is all the "
+                                                 "project has, else fit." } } },
+        { "quantize", QJsonObject{ { "type", "string" }, { "enum", QJsonArray{ "off", "1/8", "1/16" } },
+                                   { "description", "Snap note starts and ends to this grid after the tempo step (default off)." } } },
         { "snap_to_scale", propOf("string", "Move notes outside a scale to the nearest scale note: \"auto\" for the "
                                             "detected key, or a scale such as \"A minor\", \"D dorian\", \"C minor pentatonic\". "
                                             "Omit to keep the notes as sung.") },
@@ -87,20 +94,29 @@ void AiToolExecutor::registerMelodyHandlers()
         options.autoOctave = input["auto_octave"].toBool(true);
         QString error;
         const QString snap = input["snap_to_scale"].toString();
-        auto converted = MelodyToMidi::convert(*editMgr_, *audio, options, "AI: Transcribe Melody", &error, snap);
+        MelodyToMidi::Timing timing;
+        const QString tempoMode = input["tempo"].toString("keep");
+        if (tempoMode == "fit") timing.tempo = MelodyToMidi::TempoMode::Fit;
+        else if (tempoMode == "set") timing.tempo = MelodyToMidi::TempoMode::Set;
+        else if (tempoMode == "auto") timing.tempo = MelodyToMidi::TempoMode::Auto;
+        else if (tempoMode != "keep") return err(id, "tempo must be keep, fit, set or auto.");
+        const QString q = input["quantize"].toString("off");
+        if (q == "1/8") timing.quantizeBeats = 0.5;
+        else if (q == "1/16") timing.quantizeBeats = 0.25;
+        else if (q != "off") return err(id, "quantize must be off, 1/8 or 1/16.");
+        auto converted = MelodyToMidi::convert(*editMgr_, *audio, options, "AI: Transcribe Melody", &error, snap, timing);
         if (!converted) return err(id, error + " Nothing was changed.");
 
         auto& edit = *editMgr_->edit();
         const auto& r = converted->transcription.result;
         const double clipStart = converted->transcription.clipStartSeconds;
-        const double startBeat = MelodyToMidi::toBeats(edit, clipStart);
+        const double startBeat = converted->clipStartBeat;
         QJsonArray notes, low;
         std::map<int, int> snappedFrom;
         for (const auto& m : converted->transcription.snapped) snappedFrom[m.index] = m.fromPitch;
         for (size_t i = 0; i < r.notes.size(); ++i) {
             const auto& n = r.notes[i];
-            const double a = MelodyToMidi::toBeats(edit, clipStart + n.startSeconds) - startBeat;
-            const double b = MelodyToMidi::toBeats(edit, clipStart + n.endSeconds) - startBeat;
+            const auto [a, b] = converted->noteBeats[i];
             notes.append(QJsonObject{ { "i", int(i) }, { "note", n.pitch }, { "name", noteName(n.pitch) },
                                       { "start_beat", round3(a) }, { "length_beats", round3(b - a) },
                                       { "velocity", n.velocity }, { "confidence", round3(n.confidence) },
@@ -125,6 +141,10 @@ void AiToolExecutor::registerMelodyHandlers()
             { "clip_index", converted->clipIndex },
             { "clip_start_beat", round3(startBeat) },
             { "tempo_bpm", round3(tempo.getBpmAt(tracktion::TimePosition::fromSeconds(clipStart))) },
+            { "sung_tempo_bpm", round3(converted->detected.bpm) },
+            { "sung_tempo_confidence", round3(converted->detected.confidence) },
+            { "tempo_applied", converted->applied == MelodyToMidi::TempoMode::Set ? "set"
+                               : converted->applied == MelodyToMidi::TempoMode::Fit ? "fit" : "keep" },
             { "beats_per_bar", tempo.getTimeSigAt(tracktion::TimePosition::fromSeconds(clipStart)).numerator.get() },
             { "tuning_cents", int(std::lround(r.tuningCents)) },
             { "octave_shift", r.octaveShift },
