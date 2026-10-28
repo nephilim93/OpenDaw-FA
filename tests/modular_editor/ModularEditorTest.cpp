@@ -18,6 +18,8 @@
 #include "modular/FaustStarters.h"
 #include "ui/modular/FaustCodeDialog.h"
 #include "ui/modular/ModularEditorView.h"
+#include "ui/mixer/MixerView.h"
+#include "ui/timeline/TimelineView.h"
 #include "ui/modular/ModulePanelItem.h"
 
 #include <QApplication>
@@ -826,6 +828,31 @@ int main(int argc, char** argv)
 
         wav.deleteFile();
         quiet.deleteFile();
+    }
+
+    // ── Undoing a new track with the timeline and mixer open (it crashed) ──
+    std::printf("undo a new track\n");
+    {
+        TimelineView timeline(&editMgr);
+        MixerView mixer(&editMgr);
+        timeline.resize(1200, 700);
+        timeline.show();
+        mixer.show();
+        settle();
+        const int before = te::getAudioTracks(*editMgr.edit()).size();
+        um.beginNewTransaction("Add track");
+        auto* added = editMgr.addAudioTrack();
+        added->setName("Undo me");
+        editMgr.addMidiClipToTrack(*added, 0.0, 4.0);
+        settle();
+        editMgr.undo();
+        settle();
+        EXPECT(te::getAudioTracks(*editMgr.edit()).size() == before);
+        editMgr.redo();
+        settle();
+        editMgr.undo();
+        settle();
+        EXPECT(te::getAudioTracks(*editMgr.edit()).size() == before);
     }
 
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);

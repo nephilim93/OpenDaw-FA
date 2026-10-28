@@ -512,6 +512,7 @@ void ChannelStrip::setSelected(bool selected)
 
 void ChannelStrip::refresh()
 {
+    if (dropDeletedTrack()) return;
     if (isMaster_) {
         if (editMgr_ && editMgr_->edit()) {
             if (auto masterVol = editMgr_->edit()->getMasterVolumePlugin()) {
@@ -657,8 +658,18 @@ void ChannelStrip::updateMeter()
     }
 }
 
+// An undo can delete the track while this strip waits to be rebuilt.
+bool ChannelStrip::dropDeletedTrack()
+{
+    if (track_ && editMgr_ && editMgr_->edit()
+        && !te::getAudioTracks(*editMgr_->edit()).contains(track_))
+        track_ = nullptr;
+    return !isMaster_ && !track_;
+}
+
 void ChannelStrip::reconnectLevelMeterSource()
 {
+    dropDeletedTrack();
     if (levelMeterPlugin_) {
         levelMeterPlugin_->measurer.removeClient(meterClient_);
         levelMeterPlugin_ = nullptr;
