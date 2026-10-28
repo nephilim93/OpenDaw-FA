@@ -84,7 +84,9 @@ private:
 
     QTimer meterTimer_;
     te::LevelMeasurer::Client meterClient_;
-    te::LevelMeterPlugin* levelMeterPlugin_ = nullptr;
+    // Held, so a strip outliving its track (an undo deleted it) can still detach.
+    juce::ReferenceCountedObjectPtr<te::LevelMeterPlugin> levelMeterPlugin_;
+    bool dropDeletedTrack();
     double lastTrackedPlayheadSecs_ = -1.0;
 
     QPixmap stripBgPixmap_;

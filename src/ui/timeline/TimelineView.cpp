@@ -782,8 +782,19 @@ void TimelineView::onEditChanged()
                        editMgr_->getTimeSigDenominator());
     qDebug() << "[TimelineView] about to rebuildClips";
     rebuildClips();
-    for (auto* header : trackHeaders_)
-        header->refresh();
+    // An undo can delete a track without tracksChanged: its header must be
+    // rebuilt, not refreshed through a dangling pointer.
+    bool headersStale = false;
+    {
+        const auto live = te::getAudioTracks(*editMgr_->edit());
+        for (auto* header : trackHeaders_)
+            if (!live.contains(header->track())) { headersStale = true; break; }
+    }
+    if (headersStale)
+        onTracksChanged();
+    else
+        for (auto* header : trackHeaders_)
+            header->refresh();
     syncLoopStateFromTransport();
     if (videoLane_ && videoLane_->hasVideo()) {
         videoLane_->refresh();
