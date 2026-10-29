@@ -123,6 +123,9 @@ private:
     QVector<AiMessage> conversationHistory_;
     QByteArray streamBuffer_;
     QNetworkReply* currentReply_ = nullptr;
+    // A dropped connection before any reply is retried once.
+    bool replyStarted_ = false;
+    int retriesLeft_ = 1;
 
     QString currentAssistantText_;
     QVector<AiContentBlock> currentContentBlocks_;
