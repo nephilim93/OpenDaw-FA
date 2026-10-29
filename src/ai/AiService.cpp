@@ -3,6 +3,7 @@
 #include "engine/AudioEngine.h"
 #include <QDebug>
 #include <QNetworkRequest>
+#include <QTimer>
 #include <QUrl>
 
 namespace OpenDaw {
@@ -437,6 +438,7 @@ void AiService::requestSessionTitle(const QString& userMessage)
     request.setRawHeader("x-api-key", key.toUtf8());
     request.setRawHeader("anthropic-version", "2023-06-01");
     request.setTransferTimeout(30000);
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
     applyModelOptions(body, request, "low", false);
 
     auto* reply = nam_->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
@@ -576,8 +578,12 @@ void AiService::sendToApi()
     applyModelOptions(body, request, effort(), true);
 
     request.setTransferTimeout(60000);
+    // Qt's HTTP/2 drops long streamed replies ("HTTP/2 protocol error");
+    // HTTP/1.1 streams them reliably.
+    request.setAttribute(QNetworkRequest::Http2AllowedAttribute, false);
 
     QByteArray bodyData = QJsonDocument(body).toJson(QJsonDocument::Compact);
+    replyStarted_ = false;
     currentReply_ = nam_->post(request, bodyData);
 
     connect(currentReply_, &QNetworkReply::readyRead,
@@ -652,6 +658,10 @@ void AiService::handleLocalStreamChunk()
 
 void AiService::handleStreamChunk()
 {
+    if (!replyStarted_) {
+        replyStarted_ = true;
+        retriesLeft_ = 1;   // this request got through: the next one may retry again
+    }
     if (!currentReply_) return;
     streamBuffer_.append(currentReply_->readAll());
 
@@ -781,6 +791,23 @@ void AiService::handleStreamFinished()
             .arg(calls.join(", "))
             .arg(currentReply_->error() == QNetworkReply::NoError ? "ok"
                                                                  : currentReply_->errorString());
+    }
+
+    // The connection dropped before anything came back: send it again, once.
+    const auto netError = currentReply_->error();
+    const bool transient = netError == QNetworkReply::ProtocolFailure
+                        || netError == QNetworkReply::RemoteHostClosedError
+                        || netError == QNetworkReply::TemporaryNetworkFailureError
+                        || netError == QNetworkReply::NetworkSessionFailedError
+                        || netError == QNetworkReply::UnknownNetworkError;
+    if (!localRequest_ && transient && !replyStarted_ && retriesLeft_ > 0) {
+        --retriesLeft_;
+        qWarning() << "[AI] connection dropped (" << currentReply_->errorString() << "), retrying";
+        currentReply_->deleteLater();
+        currentReply_ = nullptr;
+        streamBuffer_.clear();
+        QTimer::singleShot(1000, this, [this] { if (busy_) sendToApi(); });
+        return;
     }
 
     if (currentReply_->error() != QNetworkReply::NoError
