@@ -422,6 +422,11 @@ void TransportBar::showHumModeMenu()
         HumRecorder::setStartMode(HumRecorder::StartMode::Threshold);
         updateHumModeButton();
     });
+    menu.addSeparator();
+    auto* hear = menu.addAction("Hear myself while humming (use headphones)");
+    hear->setCheckable(true);
+    hear->setChecked(HumRecorder::hearInput());
+    connect(hear, &QAction::toggled, this, [](bool on) { HumRecorder::setHearInput(on); });
     auto* levels = menu.addMenu("Threshold level");
     auto* levelGroup = new QActionGroup(levels);
     for (int db : { -50, -45, -40, -35, -30, -25, -20, -15 }) {

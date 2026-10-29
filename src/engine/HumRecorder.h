@@ -59,6 +59,9 @@ public:
     // Saved in the settings.
     static StartMode startMode();
     static void setStartMode(StartMode mode);
+    // Off by default: a laptop's own mic would feed back through its speakers.
+    static bool hearInput();
+    static void setHearInput(bool on);
     static double thresholdDb();
     static void setThresholdDb(double db);
     // Trimmed off before the first sound in Threshold mode.
@@ -102,6 +105,8 @@ private:
     te::EditItemID trackId_;
     std::map<uint64_t, bool> armedBefore_;   // track id -> armed
     std::optional<te::Edit::CountIn> countInBefore_;
+    juce::String mutedInput_;   // the input whose monitoring is off for the take
+    std::optional<te::InputDevice::MonitorMode> monitorBefore_;
     double startSeconds_ = 0.0;
     StartMode mode_ = StartMode::CountIn;   // of the take in progress
     std::optional<double> onsetSeconds_;    // Threshold: when the voice came in

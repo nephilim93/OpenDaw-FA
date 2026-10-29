@@ -102,6 +102,16 @@ void HumRecorder::setStartMode(StartMode mode)
     QSettings().setValue("hum/startMode", mode == StartMode::Threshold ? "threshold" : "countin");
 }
 
+bool HumRecorder::hearInput()
+{
+    return QSettings().value("hum/hearInput", false).toBool();
+}
+
+void HumRecorder::setHearInput(bool on)
+{
+    QSettings().setValue("hum/hearInput", on);
+}
+
 double HumRecorder::thresholdDb()
 {
     return std::clamp(QSettings().value("hum/thresholdDb", -35.0).toDouble(), -60.0, -6.0);
@@ -236,6 +246,16 @@ bool HumRecorder::start(QString* error)
     for (auto* in : edit->getEditInputDevices().getDevicesForTargetTrack(*hum))
         if (in->getInputDevice().getDeviceType() == te::InputDevice::waveDevice)
             inputName = in->getInputDevice().getName();
+    // No monitoring while humming, unless asked for: no feedback on a laptop.
+    if (!hearInput()) {
+        auto& dm = edit->engine.getDeviceManager();
+        for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
+            if (auto* dev = dm.getWaveInDevice(i); dev && dev->getName() == inputName) {
+                mutedInput_ = inputName;
+                monitorBefore_ = dev->getMonitorMode();
+                dev->setMonitorMode(te::InputDevice::MonitorMode::off);
+            }
+    }
     monitor_ = std::make_unique<LivePitchMonitor>(edit->engine);
     monitor_->start(inputName);   // no readout without it, the take still records
 
@@ -320,6 +340,12 @@ void HumRecorder::restore()
     }
     if (auto* edit = editMgr_.edit()) {
         if (countInBefore_) edit->setCountInMode(*countInBefore_);
+        if (monitorBefore_) {
+            auto& dm = edit->engine.getDeviceManager();
+            for (int i = 0; i < dm.getNumWaveInDevices(); ++i)
+                if (auto* dev = dm.getWaveInDevice(i); dev && dev->getName() == mutedInput_)
+                    dev->setMonitorMode(*monitorBefore_);
+        }
         if (trackId_.isValid()) {
             for (auto* in : edit->getAllInputDevices())
                 for (auto id : in->getTargets()) {
@@ -329,6 +355,8 @@ void HumRecorder::restore()
         }
     }
     countInBefore_.reset();
+    monitorBefore_.reset();
+    mutedInput_ = {};
     armedBefore_.clear();
     if (!lastReadout_.isEmpty()) {
         lastReadout_.clear();

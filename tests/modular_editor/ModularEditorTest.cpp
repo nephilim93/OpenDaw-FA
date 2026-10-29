@@ -909,8 +909,13 @@ int main(int argc, char** argv)
                                  [&](const QString& t) { readouts << t; });
                 edit->setCountInMode(te::Edit::CountIn::none);
                 edit->getTransport().setPosition(tracktion::TimePosition::fromSeconds(0.0));
+                auto& inDev = input->getInputDevice();
+                inDev.setMonitorMode(te::InputDevice::MonitorMode::on);
+                HumRecorder::setHearInput(false);
                 EXPECT(hum.start(&error));
                 EXPECT(hum.state() == HumRecorder::State::CountIn);
+                // No monitoring while humming: no feedback through a laptop's speakers.
+                EXPECT(inDev.getMonitorMode() == te::InputDevice::MonitorMode::off);
                 EXPECT(edit->getCountInMode() == te::Edit::CountIn::oneBar);
                 QElapsedTimer clock;
                 clock.start();
@@ -924,6 +929,7 @@ int main(int argc, char** argv)
                 EXPECT(converted != nullptr && converted->getTrack() == fresh);
                 EXPECT(edit->getCountInMode() == te::Edit::CountIn::none);
                 EXPECT(input->isRecordingEnabled(mine->itemID) && !input->isRecordingEnabled(fresh->itemID));
+                EXPECT(inDev.getMonitorMode() == te::InputDevice::MonitorMode::on);   // back as it was
                 EXPECT(readouts.size() >= 3 && readouts.first() == "Count-in 4" && readouts.last().isEmpty());
                 if (converted) converted->getSourceFileReference().getFile().deleteFile();
 
@@ -969,6 +975,17 @@ int main(int argc, char** argv)
                 }
                 HumRecorder::setStartMode(HumRecorder::StartMode::CountIn);
                 edit->setCountInMode(te::Edit::CountIn::none);
+
+                // Asked to hear the input (headphones): monitoring is left alone.
+                HumRecorder::setHearInput(true);
+                EXPECT(hum.start(&error));
+                EXPECT(inDev.getMonitorMode() == te::InputDevice::MonitorMode::on);
+                hum.stop();
+                settle(300);
+                EXPECT(inDev.getMonitorMode() == te::InputDevice::MonitorMode::on);
+                HumRecorder::setHearInput(false);
+                if (auto* last = fresh->getClips().getLast())
+                    if (auto* w = dynamic_cast<te::WaveAudioClip*>(last)) w->getSourceFileReference().getFile().deleteFile();
             }
         }
 
