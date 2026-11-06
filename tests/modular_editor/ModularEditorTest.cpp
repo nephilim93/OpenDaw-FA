@@ -10,6 +10,7 @@
 #include "engine/HumRecorder.h"
 #include "engine/MelodyToMidi.h"
 #include "ai/AiToolExecutor.h"
+#include "ai/AiAudioAnalysis.h"
 #include "ai/AiService.h"
 #include "engine/PluginScanner.h"
 #include "drums/SampleLibrary.h"
@@ -1148,6 +1149,23 @@ int main(int argc, char** argv)
         for (auto* tr : te::getAudioTracks(*editMgr.edit())) if (tr->getName() == "Gone") ++gone;
         EXPECT(gone == 0);
         AiService::setProvider("anthropic");
+    }
+
+    // ── The assistant's audio analysis across track and project changes (it crashed) ──
+    std::printf("analysis lifetime\n");
+    {
+        view.setTrack(nullptr);
+        {
+            AiAudioAnalysis gone(&editMgr);
+            gone.analyzeTrackLevels(editMgr.getAudioTracks().getFirst(), 0.05);
+        }
+        editMgr.removeTrack(editMgr.addAudioTrack());   // tracksChanged after it's gone
+        AiAudioAnalysis live(&editMgr);
+        live.analyzeTrackLevels(editMgr.getAudioTracks().getFirst(), 0.05);
+        editMgr.newEdit();                              // the same track ids, new tracks
+        settle(200);
+        const auto r = live.analyzeTrackLevels(editMgr.getAudioTracks().getFirst(), 0.05);
+        EXPECT(!r.isEmpty());
     }
 
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);

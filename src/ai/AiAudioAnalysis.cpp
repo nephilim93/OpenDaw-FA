@@ -8,7 +8,10 @@ AiAudioAnalysis::AiAudioAnalysis(EditManager* editMgr)
     : editMgr_(editMgr)
 {
     if (editMgr_) {
-        QObject::connect(editMgr_, &EditManager::tracksChanged, [this]() {
+        // The project is going: its meters with it (their ids come back
+        // in the next project, for other tracks).
+        editConn_ = QObject::connect(editMgr_, &EditManager::aboutToChangeEdit, [this] { dropAllClients(); });
+        tracksConn_ = QObject::connect(editMgr_, &EditManager::tracksChanged, [this]() {
             if (!editMgr_) return;
             auto tracks = editMgr_->getAudioTracks();
             std::unordered_set<qulonglong> liveIds;
@@ -17,6 +20,8 @@ AiAudioAnalysis::AiAudioAnalysis(EditManager* editMgr)
 
             for (auto it = meterClients_.begin(); it != meterClients_.end();) {
                 if (liveIds.count(it->first) == 0) {
+                    if (it->second.plugin && it->second.client)
+                        it->second.plugin->measurer.removeClient(*it->second.client);
                     it = meterClients_.erase(it);
                 } else {
                     ++it;
@@ -28,11 +33,17 @@ AiAudioAnalysis::AiAudioAnalysis(EditManager* editMgr)
 
 AiAudioAnalysis::~AiAudioAnalysis()
 {
-    for (auto it = meterClients_.begin(); it != meterClients_.end(); ++it) {
-        auto& entry = it->second;
+    QObject::disconnect(tracksConn_);
+    QObject::disconnect(editConn_);
+    dropAllClients();
+}
+
+void AiAudioAnalysis::dropAllClients()
+{
+    for (auto& [id, entry] : meterClients_)
         if (entry.plugin && entry.client)
             entry.plugin->measurer.removeClient(*entry.client);
-    }
+    meterClients_.clear();
 }
 
 AiAudioAnalysis::MeterClientEntry* AiAudioAnalysis::ensureClient(te::AudioTrack* track)
