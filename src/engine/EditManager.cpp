@@ -219,7 +219,9 @@ bool EditManager::saveEdit()
     if (!edit_ || currentFile_ == juce::File())
         return false;
     unfreezeAllTracks();
-    te::EditFileOperations(*edit_).save(true, true, false);
+    // A failed write keeps the autosave and the unsaved state.
+    if (!te::EditFileOperations(*edit_).save(false, true, false))
+        return false;
     clearAutosave();
     hasUnsavedChanges_ = false;
     return true;
@@ -231,7 +233,11 @@ bool EditManager::saveEditAs(const juce::File& file)
         return false;
     unfreezeAllTracks();
     edit_->editFileRetriever = [file]() { return file; };
-    te::EditFileOperations(*edit_).save(true, true, false);
+    if (!te::EditFileOperations(*edit_).save(false, true, false)) {
+        const auto previous = currentFile_;
+        edit_->editFileRetriever = [previous]() { return previous; };
+        return false;
+    }
     currentFile_ = file;
     clearAutosave();
     hasUnsavedChanges_ = false;

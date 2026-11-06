@@ -1018,6 +1018,29 @@ int main(int argc, char** argv)
         EXPECT(te::getAudioTracks(*editMgr.edit()).size() == before);
     }
 
+    // ── A save that can't write reports it and keeps the project unsaved ──
+    std::printf("failed save\n");
+    {
+        auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getNonexistentChildFile("odsave", "");
+        dir.createDirectory();
+        const auto good = dir.getChildFile("song.tracktionedit");
+        EXPECT(editMgr.saveEditAs(good) && good.existsAsFile() && !editMgr.hasUnsavedChanges());
+        editMgr.removeTrack(editMgr.addAudioTrack());
+        settle();
+        EXPECT(editMgr.hasUnsavedChanges());
+        dir.setReadOnly(true);
+        good.setReadOnly(true);
+        EXPECT(!editMgr.saveEdit());
+        EXPECT(editMgr.hasUnsavedChanges());
+        const auto bad = dir.getChildFile("other.tracktionedit");
+        EXPECT(!editMgr.saveEditAs(bad) && !bad.existsAsFile());
+        EXPECT(editMgr.currentFile() == good && editMgr.hasUnsavedChanges());
+        good.setReadOnly(false);
+        dir.setReadOnly(false);
+        EXPECT(editMgr.saveEdit() && !editMgr.hasUnsavedChanges());
+        dir.deleteRecursively();
+    }
+
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);
     view.setTrack(nullptr);
     return failures ? 1 : 0;

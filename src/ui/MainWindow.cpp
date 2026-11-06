@@ -1166,9 +1166,18 @@ void MainWindow::onSaveProject()
         return;
     }
     if (routingView_) routingView_->flushNodePositions();
-    editMgr_.saveEdit();
+    if (!editMgr_.saveEdit())
+        showSaveFailed(editMgr_.currentFile());
     if (aiChatWidget_) aiChatWidget_->saveChatSessions();
     updateWindowTitle();
+}
+
+void MainWindow::showSaveFailed(const juce::File& file)
+{
+    QMessageBox::critical(this, "Save Failed",
+        QString("Could not write %1.\n\nCheck that the disk has space and the folder can be written to. "
+                "Your changes are still open and the autosave is kept.")
+            .arg(QString::fromUtf8(file.getFullPathName().toRawUTF8())));
 }
 
 void MainWindow::onSaveProjectAs()
@@ -1187,6 +1196,8 @@ void MainWindow::onSaveProjectAs()
     juce::File file(juce::String(path.toUtf8().constData()));
     if (editMgr_.saveEditAs(file))
         addRecentProject(QFileInfo(path).absoluteFilePath());
+    else
+        showSaveFailed(file);
     if (aiChatWidget_) aiChatWidget_->saveChatSessions();
     updateWindowTitle();
 }
