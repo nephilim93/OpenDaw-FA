@@ -399,7 +399,9 @@ void AiToolExecutor::registerHandlers()
     handlers_["set_track_volume"] = [this](const QJsonObject& input, const QString& id) -> AiToolResult {
         auto* track = resolveTrack(input["track"]);
         if (!track) return err(id, "Track not found.");
-        double db = input["volume_db"].toDouble();
+        // The fader's range; a NaN becomes unity.
+        const double raw = input["volume_db"].toDouble();
+        const double db = std::isfinite(raw) ? std::clamp(raw, -100.0, 6.0) : 0.0;
         for (auto* p : track->pluginList.getPlugins()) {
             if (auto* vp = dynamic_cast<te::VolumeAndPanPlugin*>(p)) {
                 float pos = te::decibelsToVolumeFaderPosition(static_cast<float>(db));
@@ -416,10 +418,11 @@ void AiToolExecutor::registerHandlers()
     handlers_["set_track_pan"] = [this](const QJsonObject& input, const QString& id) -> AiToolResult {
         auto* track = resolveTrack(input["track"]);
         if (!track) return err(id, "Track not found.");
-        double pan = input["pan"].toDouble();
+        const double raw = input["pan"].toDouble();
+        const double pan = std::isfinite(raw) ? std::clamp(raw, -1.0, 1.0) : 0.0;
         for (auto* p : track->pluginList.getPlugins()) {
             if (auto* vp = dynamic_cast<te::VolumeAndPanPlugin*>(p)) {
-                vp->pan.setValue(static_cast<float>(pan), nullptr);
+                vp->setPan(static_cast<float>(pan));
                 emitEditChanged();
                 return ok(id, QString("Track '%1' pan set to %2.")
                               .arg(QString::fromStdString(track->getName().toStdString()))
@@ -1179,6 +1182,9 @@ void AiToolExecutor::registerHandlers()
             int channel = noteObj.contains("channel") ? noteObj["channel"].toInt(1) : 1;
 
             if (noteNum < 0 || noteNum > 127) continue;
+            // Outside the clip (or nonsense): skipped, not counted as added.
+            if (!std::isfinite(startBeat) || startBeat < 0.0 || startBeat > 100000.0
+                || !std::isfinite(lenBeats) || lenBeats > 100000.0) continue;
             velocity = std::clamp(velocity, 1, 127);
             channel = std::clamp(channel, 1, 16);
             if (lenBeats <= 0.0) lenBeats = 0.25;
@@ -1196,6 +1202,8 @@ void AiToolExecutor::registerHandlers()
 
         QJsonObject result;
         result["added"] = added;
+        if (added < notes.size())
+            result["skipped"] = int(notes.size()) - added;   // bad pitch or position
         result["total_notes"] = seq.getNotes().size();
         return ok(id, result);
     };
