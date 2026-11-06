@@ -414,6 +414,28 @@ int main(int argc, char** argv)
         }
     }
 
+    // ── The assistant's mixer and note values are kept in range ──
+    std::printf("AI tool ranges\n");
+    {
+        PluginScanner scanner(engine);
+        AiToolExecutor tools(&editMgr, &engine, &scanner);
+        auto* t = editMgr.addMidiTrack();
+        t->setName("Ranges");
+        auto* vp = t->getVolumePlugin();
+        EXPECT(!tools.execute(AiToolCall{ "r1", "set_track_pan", QJsonObject{ { "track", "Ranges" }, { "pan", 50 } } }).isError);
+        EXPECT(vp && vp->getPan() == 1.0f);
+        const auto rv = tools.execute(AiToolCall{ "r2", "set_track_volume", QJsonObject{ { "track", "Ranges" }, { "volume_db", 200 } } });
+        EXPECT(!rv.isError && rv.content.contains("6.0 dB"));   // what was really set
+        EXPECT(vp && std::abs(vp->getVolumeDb() - 6.0f) < 0.1f);
+        editMgr.addMidiClipToTrack(*t, 0.0, 4.0);
+        const auto r = tools.execute(AiToolCall{ "r3", "add_midi_notes", QJsonObject{ { "track", "Ranges" }, { "clip_index", 0 },
+            { "notes", QJsonArray{ QJsonObject{ { "note", 60 }, { "start_beat", -4 } },
+                                   QJsonObject{ { "note", 62 }, { "start_beat", 1e9 } },
+                                   QJsonObject{ { "note", 64 }, { "start_beat", 1 } } } } } });
+        const auto res = QJsonDocument::fromJson(r.content.toUtf8()).object();
+        EXPECT(!r.isError && res["added"].toInt() == 1 && res["skipped"].toInt() == 2);
+    }
+
     // ── The Drum Machine AI tools, through the real tool executor ──
     std::printf("drum AI tools\n");
     {
