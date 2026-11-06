@@ -1038,6 +1038,27 @@ int main(int argc, char** argv)
         good.setReadOnly(false);
         dir.setReadOnly(false);
         EXPECT(editMgr.saveEdit() && !editMgr.hasUnsavedChanges());
+    // ── Restoring an autosave opens it as its own project, not the autosave ──
+    std::printf("restore recovery\n");
+    {
+        view.setTrack(nullptr);
+        auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getNonexistentChildFile("odrecover", "");
+        dir.createDirectory();
+        const auto autosave = dir.getChildFile("abc.tracktionedit");
+        EXPECT(editMgr.saveEditAs(autosave));
+        dir.getChildFile("abc.json").replaceWithText("{}");
+        const auto path = QString::fromUtf8(autosave.getFullPathName().toRawUTF8());
+
+        EXPECT(editMgr.restoreRecovery({ path, QString(), QString() }));
+        EXPECT(editMgr.currentFile() == juce::File() && editMgr.hasUnsavedChanges());
+        EXPECT(!autosave.existsAsFile() && !dir.getChildFile("abc.json").existsAsFile());
+        EXPECT(!editMgr.saveEdit());   // untitled: the window asks where (Save As)
+
+        const auto song = dir.getChildFile("song.tracktionedit");
+        EXPECT(editMgr.saveEditAs(autosave));
+        EXPECT(editMgr.restoreRecovery({ path, QString::fromUtf8(song.getFullPathName().toRawUTF8()), QString() }));
+        EXPECT(editMgr.currentFile() == song && editMgr.saveEdit() && song.existsAsFile());
+        EXPECT(!autosave.existsAsFile());
         dir.deleteRecursively();
     }
 

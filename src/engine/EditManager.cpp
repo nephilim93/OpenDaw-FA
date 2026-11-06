@@ -2274,6 +2274,19 @@ QString EditManager::autosaveDir()
     return dir;
 }
 
+bool EditManager::restoreRecovery(const RecoveryInfo& info)
+{
+    const juce::File autosaveFile(juce::String(info.autosavePath.toUtf8().constData()));
+    if (!loadEdit(autosaveFile)) return false;
+    currentFile_ = info.originalPath.isEmpty()
+        ? juce::File() : juce::File(juce::String(info.originalPath.toUtf8().constData()));
+    edit_->editFileRetriever = [f = currentFile_]() { return f; };
+    hasUnsavedChanges_ = true;
+    QFile::remove(info.autosavePath);
+    QFile::remove(info.autosavePath.left(info.autosavePath.lastIndexOf('.')) + ".json");
+    return true;
+}
+
 QString EditManager::autosaveFileId() const
 {
     QString source;
