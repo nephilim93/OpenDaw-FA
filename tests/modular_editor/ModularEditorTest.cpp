@@ -1150,6 +1150,52 @@ int main(int argc, char** argv)
         AiService::setProvider("anthropic");
     }
 
+    // ── Clearing the chat mid-reply: the partial reply runs nothing ──
+    std::printf("assistant clear mid-reply\n");
+    {
+        QTcpServer server;
+        EXPECT(server.listen(QHostAddress::LocalHost));
+        int requests = 0;
+        QTcpSocket* open = nullptr;
+        QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+            auto* sock = server.nextPendingConnection();
+            QObject::connect(sock, &QTcpSocket::readyRead, sock, [&, sock] {
+                sock->readAll();
+                if (open == sock) return;
+                open = sock;
+                ++requests;
+                // A tool call starts streaming, and the reply stays open.
+                const QJsonObject tc{ { "index", 0 }, { "id", "c1" }, { "type", "function" },
+                                      { "function", QJsonObject{ { "name", "delete_track" },
+                                                                 { "arguments", "{\"track\":\"Keep" } } } };
+                const QJsonObject chunk{ { "choices", QJsonArray{ QJsonObject{ { "index", 0 },
+                    { "delta", QJsonObject{ { "tool_calls", QJsonArray{ tc } } } } } } } };
+                sock->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\n\r\ndata: "
+                            + QJsonDocument(chunk).toJson(QJsonDocument::Compact) + "\n\n");
+            });
+        });
+        AiService::setProvider("local");
+        AiService::setLocalBaseUrl(QString("http://127.0.0.1:%1/v1").arg(server.serverPort()));
+        AiService::setConfirmDestructive(false);
+        AiService ai(&editMgr, &engine, nullptr);
+        int ran = 0;
+        QObject::connect(&ai, &AiService::toolCallFinished, &ai, [&] { ++ran; });
+        ai.sendMessage("Delete Keep");
+        QElapsedTimer t;
+        t.start();
+        while (!open && t.elapsed() < 5000) settle(50);
+        settle(200);
+        EXPECT(ai.isBusy());
+        ai.clearConversation();
+        settle(500);
+        EXPECT(!ai.isBusy() && ran == 0 && requests == 1);
+        int keep = 0;
+        for (auto* tr : te::getAudioTracks(*editMgr.edit())) if (tr->getName() == "Keep") ++keep;
+        EXPECT(keep == 1);
+        AiService::setConfirmDestructive(true);
+        AiService::setProvider("anthropic");
+    }
+
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);
     view.setTrack(nullptr);
     return failures ? 1 : 0;

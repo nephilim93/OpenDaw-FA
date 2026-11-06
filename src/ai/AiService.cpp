@@ -1,4 +1,5 @@
 #include "AiService.h"
+#include <utility>
 #include "engine/EditManager.h"
 #include "engine/AudioEngine.h"
 #include <QDebug>
@@ -389,15 +390,23 @@ const char* const AiService::kSystemPromptRules =
 
 void AiService::clearConversation()
 {
-    if (currentReply_) {
-        currentReply_->abort();
-        currentReply_->deleteLater();
-        currentReply_ = nullptr;
-    }
+    dropReply();
     conversationHistory_.clear();
     toolRoundCount_ = 0;
     toolResults_.clear();
     setBusy(false);
+}
+
+void AiService::dropReply()
+{
+    // Forgotten before the abort, which emits finished: nothing of the
+    // partial reply is processed, no tool runs and no request follows.
+    if (auto* reply = std::exchange(currentReply_, nullptr)) {
+        reply->disconnect(this);
+        reply->abort();
+        reply->deleteLater();
+        streamBuffer_.clear();
+    }
 }
 
 void AiService::loadConversation(const QVector<AiMessage>& messages)
@@ -449,6 +458,7 @@ void AiService::requestSessionTitle(const QString& userMessage)
     auto* reply = nam_->post(request, QJsonDocument(body).toJson(QJsonDocument::Compact));
     connect(reply, &QNetworkReply::finished, this, [this, reply]() {
         reply->deleteLater();
+        streamBuffer_.clear();
         if (reply->error() != QNetworkReply::NoError) return;
 
         auto doc = QJsonDocument::fromJson(reply->readAll());
@@ -775,7 +785,9 @@ void AiService::handleStreamChunk()
         else if (type == "error") {
             auto errObj = obj["error"].toObject();
             emit errorOccurred(errObj["message"].toString());
+            dropReply();   // the turn ends here: the partial reply isn't used
             setBusy(false);
+            return;
         }
     }
 }

@@ -116,6 +116,7 @@ private:
                            const QString& effortLevel, bool allowFallback) const;
     QJsonObject messageToJson(const AiMessage& msg) const;
     void setBusy(bool busy);
+    void dropReply();   // stops the request in flight, ignoring its reply
 
     EditManager* editMgr_;
     AudioEngine* audioEngine_;
