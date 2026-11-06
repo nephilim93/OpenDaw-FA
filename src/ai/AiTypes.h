@@ -14,6 +14,7 @@ struct AiToolCall {
     QString id;
     QString name;
     QJsonObject input;
+    bool badInput = false;   // its arguments weren't a JSON object (cut off?): not run
 
     QJsonObject toJson() const {
         QJsonObject obj;

@@ -1075,6 +1075,66 @@ int main(int argc, char** argv)
         dir.deleteRecursively();
     }
 
+    // ── A tool call whose arguments arrive cut off is not run ──
+    std::printf("assistant bad arguments\n");
+    {
+        auto* bad = editMgr.addAudioTrack();
+        bad->setName("Bad");
+        const float volBefore = bad->getVolumePlugin()->getVolumeDb();
+        QTcpServer server;
+        EXPECT(server.listen(QHostAddress::LocalHost));
+        QList<QByteArray> bodies;
+        QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+            auto* sock = server.nextPendingConnection();
+            auto buf = std::make_shared<QByteArray>();
+            QObject::connect(sock, &QTcpSocket::readyRead, sock, [&, sock, buf] {
+                buf->append(sock->readAll());
+                const int end = buf->indexOf("\r\n\r\n");
+                if (end < 0) return;
+                const auto head = buf->left(end).toLower();
+                const int at = head.indexOf("content-length:");
+                const int len = at < 0 ? 0 : head.mid(at + 15, head.indexOf("\r\n", at) - at - 15).trimmed().toInt();
+                if (buf->size() < end + 4 + len) return;
+                bodies.append(buf->mid(end + 4, len));
+                QJsonObject delta;
+                if (bodies.size() == 1) {
+                    const QJsonObject tc{ { "index", 0 }, { "id", "c1" }, { "type", "function" },
+                        { "function", QJsonObject{ { "name", "set_track_volume" },
+                                                   { "arguments", "{\"track\":\"Bad\",\"volume_db\":-2" } } } };
+                    delta["tool_calls"] = QJsonArray{ tc };
+                } else {
+                    delta["content"] = "Sorry.";
+                }
+                const QJsonObject chunk{ { "choices", QJsonArray{ QJsonObject{ { "index", 0 }, { "delta", delta },
+                    { "finish_reason", bodies.size() == 1 ? "tool_calls" : "stop" } } } } };
+                const QByteArray body = "data: " + QJsonDocument(chunk).toJson(QJsonDocument::Compact)
+                                      + "\n\ndata: [DONE]\n\n";
+                sock->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: "
+                            + QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                sock->disconnectFromHost();
+            });
+        });
+        AiService::setProvider("local");
+        AiService::setLocalBaseUrl(QString("http://127.0.0.1:%1/v1").arg(server.serverPort()));
+        AiService::setLocalModel("fake");
+        AiService ai(&editMgr, &engine, nullptr);
+        bool done = false, wasError = false;
+        QString said;
+        QObject::connect(&ai, &AiService::responseComplete, &ai, [&] { done = true; });
+        QObject::connect(&ai, &AiService::toolCallFinished, &ai,
+                         [&](const QString&, const QString&, const QString& content, bool err) {
+                             wasError = err;
+                             said = content;
+                         });
+        ai.sendMessage("Turn Bad down");
+        QElapsedTimer t;
+        t.start();
+        while (!done && t.elapsed() < 10000) settle(50);
+        EXPECT(done && wasError && bodies.size() == 2 && said.startsWith("Not run"));
+        EXPECT(bad->getVolumePlugin()->getVolumeDb() == volBefore);   // not run with empty values
+        AiService::setProvider("anthropic");
+    }
+
     // ── A confirmed destructive call: the results of the calls before it are sent too ──
     // (a fake local server, so no paid API)
     std::printf("assistant confirm\n");

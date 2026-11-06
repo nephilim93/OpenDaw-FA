@@ -123,7 +123,8 @@ QVector<AiContentBlock> toContentBlocks(const StreamState& state, QStringList* b
         const auto args = QJsonDocument::fromJson(call.arguments.trimmed().isEmpty()
                                                       ? QByteArray("{}")
                                                       : call.arguments.toUtf8());
-        if (!args.isObject() && badToolCalls)
+        block.toolCall.badInput = !args.isObject();
+        if (block.toolCall.badInput && badToolCalls)
             badToolCalls->append(call.name);
         block.toolCall.input = args.object();
         blocks.append(block);
