@@ -954,6 +954,8 @@ int main(int argc, char** argv)
                 EXPECT(hum.state() == HumRecorder::State::Idle && converted == nullptr);
                 EXPECT(fresh->getClips().size() == clipsBefore);
                 EXPECT(edit->getCountInMode() == te::Edit::CountIn::twoBar);   // ...and comes back
+                // The arming comes back too: the user's track, not the Hum one.
+                EXPECT(input->isRecordingEnabled(mine->itemID) && !input->isRecordingEnabled(fresh->itemID));
 
                 // The voice comes in 0.5 s after the start: the take is trimmed to just before it.
                 EXPECT(hum.start(&error));
