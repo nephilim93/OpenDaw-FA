@@ -1364,6 +1364,23 @@ int main(int argc, char** argv)
         AiService::setProvider("anthropic");
     }
 
+    // ── The assistant's audio analysis across track and project changes (it crashed) ──
+    std::printf("analysis lifetime\n");
+    {
+        view.setTrack(nullptr);
+        {
+            AiAudioAnalysis gone(&editMgr);
+            gone.analyzeTrackLevels(editMgr.getAudioTracks().getFirst(), 0.05);
+        }
+        editMgr.removeTrack(editMgr.addAudioTrack());   // tracksChanged after it's gone
+        AiAudioAnalysis live(&editMgr);
+        live.analyzeTrackLevels(editMgr.getAudioTracks().getFirst(), 0.05);
+        editMgr.newEdit();                              // the same track ids, new tracks
+        settle(200);
+        const auto r = live.analyzeTrackLevels(editMgr.getAudioTracks().getFirst(), 0.05);
+        EXPECT(!r.isEmpty());
+    }
+
     // ── Opening another project during a Hum take leaves the new one alone ──
     std::printf("hum across a project change\n");
     {
