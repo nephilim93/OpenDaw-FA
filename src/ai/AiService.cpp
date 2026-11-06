@@ -763,6 +763,7 @@ void AiService::handleStreamChunk()
                 if (block.type == "tool_use") {
                     auto inputDoc = QJsonDocument::fromJson(currentToolInputStr_.toUtf8());
                     block.toolCall.input = inputDoc.object();
+                    block.toolCall.badInput = !currentToolInputStr_.trimmed().isEmpty() && !inputDoc.isObject();
                 }
                 inToolInput_ = false;
                 currentToolInputStr_.clear();
@@ -925,12 +926,20 @@ void AiService::runPendingToolCalls()
         if (block.type != "tool_use") continue;
         const auto& call = block.toolCall;
         if (!toolResults_.contains(call.id)) {
-            if (confirmDestructive() && toolExecutor_->isDestructive(call.name)) {
+            if (!call.badInput && confirmDestructive() && toolExecutor_->isDestructive(call.name)) {
                 toolExecutor_->endBatch();
                 emit confirmDestructiveAction(call.name, call);
                 return;
             }
-            auto result = toolExecutor_->execute(call);
+            AiToolResult result;
+            if (call.badInput) {
+                result.toolUseId = call.id;
+                result.content = "Not run: the arguments were not valid JSON (cut off?). "
+                                 "Call it again with complete arguments.";
+                result.isError = true;
+            } else {
+                result = toolExecutor_->execute(call);
+            }
             toolResults_.insert(call.id, result);
             emit toolCallFinished(call.name, call.id, result.content, result.isError);
         }
