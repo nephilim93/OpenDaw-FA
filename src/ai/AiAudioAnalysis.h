@@ -26,7 +26,9 @@ public:
 private:
     struct MeterClientEntry {
         std::unique_ptr<te::LevelMeasurer::Client> client;
-        te::LevelMeterPlugin* plugin = nullptr;
+        // Held, so removing the client is safe after its track is deleted
+        // (an undo can keep the plugin alive, still measuring).
+        juce::ReferenceCountedObjectPtr<te::LevelMeterPlugin> plugin;
     };
 
     MeterClientEntry* ensureClient(te::AudioTrack* track);
@@ -34,8 +36,11 @@ private:
     static double linearToDb(double linear);
     static double clamp01(double v);
 
+    void dropAllClients();
+
     EditManager* editMgr_ = nullptr;
     std::unordered_map<qulonglong, MeterClientEntry> meterClients_;
+    QMetaObject::Connection tracksConn_, editConn_;   // disconnected in the destructor
 };
 
 } // namespace OpenDaw

@@ -10,6 +10,7 @@
 #include "engine/HumRecorder.h"
 #include "engine/MelodyToMidi.h"
 #include "ai/AiToolExecutor.h"
+#include "ai/AiAudioAnalysis.h"
 #include "ai/AiService.h"
 #include "engine/PluginScanner.h"
 #include "drums/SampleLibrary.h"
