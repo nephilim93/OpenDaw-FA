@@ -19,6 +19,7 @@
 #include "ui/modular/FaustCodeDialog.h"
 #include "ui/modular/ModularEditorView.h"
 #include "ui/mixer/MixerView.h"
+#include "ui/effects/EffectChainWidget.h"
 #include "ui/timeline/TimelineView.h"
 #include "ui/modular/ModulePanelItem.h"
 
@@ -998,6 +999,8 @@ int main(int argc, char** argv)
     {
         TimelineView timeline(&editMgr);
         MixerView mixer(&editMgr);
+        EffectChainWidget fx(&editMgr);
+        fx.show();
         timeline.resize(1200, 700);
         timeline.show();
         mixer.show();
@@ -1008,7 +1011,9 @@ int main(int argc, char** argv)
         added->setName("Undo me");
         editMgr.addMidiClipToTrack(*added, 0.0, 4.0);
         settle();
+        fx.setTrack(added);   // its effects shown, as when it's selected
         editMgr.undo();
+        EXPECT(fx.currentTrack() == nullptr);   // let go of at once, before any rebuild
         settle();
         EXPECT(te::getAudioTracks(*editMgr.edit()).size() == before);
         editMgr.redo();

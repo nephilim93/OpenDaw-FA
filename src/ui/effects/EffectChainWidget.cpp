@@ -259,6 +259,12 @@ EffectChainWidget::EffectChainWidget(EditManager* editMgr, QWidget* parent)
     connect(&rebuildTimer_, &QTimer::timeout, this, &EffectChainWidget::rebuild);
 
     connect(editMgr_, &EditManager::editChanged, this, [this]() {
+        // Deleted, or removed by an undo: drop it now, before the slots
+        // (their plugins are gone too) are polled or rebuilt.
+        if (track_ && !(editMgr_->edit() && te::getAudioTracks(*editMgr_->edit()).contains(track_))) {
+            setTrack(nullptr);
+            return;
+        }
         if (track_ || masterMode_) scheduleRebuild();
     });
 
