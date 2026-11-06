@@ -67,6 +67,7 @@ private:
     QString projectDialogStartDir(bool forNewProject) const;
     void onSaveProject();
     void onSaveProjectAs();
+    void showSaveFailed(const juce::File& file);
     void onExportAudio();
     void onImportMidi();
     void onExportMidi();
