@@ -436,6 +436,21 @@ int main(int argc, char** argv)
         EXPECT(!r.isError && res["added"].toInt() == 1 && res["skipped"].toInt() == 2);
     }
 
+    // ── Each assistant action is its own undo step ──
+    std::printf("AI undo steps\n");
+    {
+        PluginScanner scanner(engine);
+        AiToolExecutor tools(&editMgr, &engine, &scanner);
+        auto* t = editMgr.addMidiTrack();
+        t->setName("Steps");
+        um.beginNewTransaction("Rename");
+        t->setName("Mine");                       // the user's own edit
+        EXPECT(!tools.execute(AiToolCall{ "u1", "rename_track", QJsonObject{ { "track", "Mine" }, { "new_name", "Theirs" } } }).isError);
+        EXPECT(t->getName() == "Theirs");
+        um.undo();                                // undoes the assistant's rename only
+        EXPECT(t->getName() == "Mine");
+    }
+
     // ── The Drum Machine AI tools, through the real tool executor ──
     std::printf("drum AI tools\n");
     {
