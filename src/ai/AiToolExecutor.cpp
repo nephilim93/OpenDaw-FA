@@ -1610,6 +1610,9 @@ AiToolResult AiToolExecutor::execute(const AiToolCall& call)
     auto it = handlers_.find(call.name);
     if (it == handlers_.end())
         return err(call.id, QString("Unknown tool '%1'.").arg(call.name));
+    // Each call is its own undo step, never merged into the user's last edit.
+    if (editMgr_ && editMgr_->edit())
+        editMgr_->edit()->getUndoManager().beginNewTransaction("AI: " + juce::String(call.name.toUtf8().constData()));
     return it.value()(call.input, call.id);
 }
 
