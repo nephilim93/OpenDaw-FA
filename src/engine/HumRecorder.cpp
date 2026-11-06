@@ -280,7 +280,11 @@ void HumRecorder::stop()
     const bool discard = state_ == State::Waiting;
     if (auto* edit = editMgr_.edit())
         edit->getTransport().stop(discard, false);
-    if (discard) trackId_ = {};
+    if (discard) {
+        restore();       // with the Hum track still known, so its arming is undone
+        trackId_ = {};   // and a late clip from the discarded take is ignored
+        return;
+    }
     poll();
 }
 
