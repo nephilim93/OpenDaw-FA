@@ -391,6 +391,7 @@ int main(int argc, char** argv)
 
             // A short loop (less than the jump threshold) also resends it.
             play(2.0, 0.1, true);
+            settle(100);   // its last ticks are still on their way: let them in before clearing
             listener.clear();
             play(2.0, 0.1, true);
             settle(100);
