@@ -238,6 +238,7 @@ bool EditManager::saveEditAs(const juce::File& file)
         edit_->editFileRetriever = [previous]() { return previous; };
         return false;
     }
+    clearAutosave();   // the one kept under the old name (or "untitled")
     currentFile_ = file;
     clearAutosave();
     hasUnsavedChanges_ = false;

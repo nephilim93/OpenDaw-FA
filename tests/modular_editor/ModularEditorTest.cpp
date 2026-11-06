@@ -35,6 +35,8 @@
 #include <QPushButton>
 #include <QTemporaryDir>
 #include <QTcpServer>
+#include <QCryptographicHash>
+#include <QDir>
 #include <QTcpSocket>
 #include <cstdio>
 
@@ -1085,6 +1087,25 @@ int main(int argc, char** argv)
         good.setReadOnly(false);
         dir.setReadOnly(false);
         EXPECT(editMgr.saveEdit() && !editMgr.hasUnsavedChanges());
+        dir.deleteRecursively();
+    }
+
+    // ── Save As removes the autosave kept while the project was untitled ──
+    std::printf("untitled autosave\n");
+    {
+        view.setTrack(nullptr);
+        editMgr.newEdit();
+        const QString id = QCryptographicHash::hash("untitled", QCryptographicHash::Md5).toHex();
+        const QString stale = EditManager::autosaveDir() + "/" + id + ".tracktionedit";
+        QDir().mkpath(EditManager::autosaveDir());
+        QFile f(stale);
+        EXPECT(f.open(QIODevice::WriteOnly));
+        f.close();
+        auto dir = juce::File::getSpecialLocation(juce::File::tempDirectory).getNonexistentChildFile("odauto", "");
+        dir.createDirectory();
+        EXPECT(editMgr.saveEditAs(dir.getChildFile("named.tracktionedit")));
+        EXPECT(!QFile::exists(stale));
+        QFile::remove(stale);
         dir.deleteRecursively();
     }
 
