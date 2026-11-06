@@ -86,6 +86,9 @@ private:
     // a free-tempo one (threshold start) also gets its tempo detected and used.
     enum class MelodySource { ClipMenu, HumOnClick, HumFreeTempo };
     void convertMelodyToMidi(te::WaveAudioClip* clip, MelodySource source = MelodySource::ClipMenu);
+    // Warns once when MIDI couldn't start (no blocking dialog).
+    void warnMidiProblem(const QString& message);
+    bool midiWarned_ = false;
 
     OpenDawApplication& app_;
     EditManager& editMgr_;

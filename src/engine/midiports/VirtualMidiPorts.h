@@ -5,6 +5,7 @@
 #include <QStringList>
 #include <array>
 #include <atomic>
+#include <functional>
 #include <map>
 #include <memory>
 #include <vector>
@@ -63,6 +64,13 @@ public:
     static VirtualMidiPorts* instance();
 
     static bool supported();
+    // Why MIDI is unavailable to this process (empty when it works). macOS
+    // refuses MIDI to an app opened right after another MIDI app quit, for
+    // as long as the app runs.
+    static juce::String systemMidiProblem();
+    // Called (message thread) when the ports still can't be made after the
+    // retries, with the reason.
+    std::function<void(const juce::String&)> onPortsFailed;
     // The setting (on by default where supported).
     static bool enabledInSettings();
 

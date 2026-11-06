@@ -12,6 +12,7 @@
 #include "ui/dialogs/MidiOutDialog.h"
 #include "engine/MelodyToMidi.h"
 #include "engine/midiports/MidiOutPlugin.h"
+#include "engine/midiports/VirtualMidiPorts.h"
 #include "ui/dialogs/SettingsDialog.h"
 #include "ui/video/VideoPlayerWidget.h"
 #include "ui/SplashScreen.h"
@@ -167,9 +168,30 @@ MainWindow::MainWindow(OpenDawApplication& app, QWidget* parent)
                     aiDock_->raise();
                 }
             });
+
+    auto& ports = app_.audioEngine().virtualMidiPorts();
+    ports.onPortsFailed = [this](const juce::String& why) { warnMidiProblem(QString::fromUtf8(why.toRawUTF8())); };
+    QTimer::singleShot(0, this, [this] {
+        if (auto why = VirtualMidiPorts::systemMidiProblem(); why.isNotEmpty())
+            warnMidiProblem(QString::fromUtf8(why.toRawUTF8()));
+    });
 }
 
-MainWindow::~MainWindow() = default;
+void MainWindow::warnMidiProblem(const QString& message)
+{
+    if (midiWarned_) return;   // the ports fail too when MIDI itself is out
+    midiWarned_ = true;
+    auto* box = new QMessageBox(QMessageBox::Warning, "MIDI unavailable", message,
+                                QMessageBox::Ok, this);
+    box->setAttribute(Qt::WA_DeleteOnClose);
+    box->setModal(false);
+    box->show();
+}
+
+MainWindow::~MainWindow()
+{
+    app_.audioEngine().virtualMidiPorts().onPortsFailed = nullptr;
+}
 
 bool MainWindow::maybeSaveBeforeAction()
 {

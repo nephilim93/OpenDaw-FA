@@ -64,6 +64,18 @@ bool VirtualMidiPorts::supported()
 #endif
 }
 
+juce::String VirtualMidiPorts::systemMidiProblem()
+{
+#if JUCE_MAC
+    if (!juce::ump::Endpoints::getInstance()->getBackend())
+        return "macOS didn't let OpenDaw use MIDI. This happens when OpenDaw is "
+               "opened right after quitting it. MIDI keyboards, other apps' MIDI "
+               "and OpenDaw's own ports won't work until you quit OpenDaw and open "
+               "it again.";
+#endif
+    return {};
+}
+
 bool VirtualMidiPorts::enabledInSettings()
 {
     return supported() && QSettings().value(kEnabledKey, true).toBool();
@@ -135,6 +147,10 @@ void VirtualMidiPorts::timerCallback()
         stopTimer();
         juce::Logger::writeToLog("Virtual MIDI: could not create '" + juce::String(kInName)
                                  + "' (is another OpenDaw running?)");
+        if (onPortsFailed)
+            onPortsFailed("OpenDaw couldn't publish its MIDI ports (\"" + juce::String(kInName)
+                          + "\" and \"" + juce::String(kOutName) + "\"), so other apps can't "
+                          "send MIDI to it or receive it. Is another copy of OpenDaw running?");
     }
 }
 
