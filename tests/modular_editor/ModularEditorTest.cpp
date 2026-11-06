@@ -163,6 +163,43 @@ int main(int argc, char** argv)
         }
     }
 
+    // A runaway patch that makes NaN: the plugin's output is silence, never NaN.
+    std::printf("synth output stays finite\n");
+    {
+        auto mod = [](const char* id, const char* type, QJsonObject params) {
+            return QJsonObject{ { "id", id }, { "type", type }, { "section", "global" }, { "params", params } };
+        };
+        auto cable = [](const char* from, const char* to) { return QJsonObject{ { "from", from }, { "to", to } }; };
+        const QJsonObject json{
+            { "modules", QJsonArray{ mod("a", "scale", { { "scale", 2 }, { "offset", 1 } }),
+                                     mod("b", "scale", { { "scale", -1 } }),
+                                     mod("m", "mixer", { { "master", 1 } }),
+                                     mod("out", "output", { { "volume", 1 } }) } },
+            { "cables", QJsonArray{ cable("a.out", "a.in"), cable("a.out", "b.in"), cable("a.out", "m.in1"),
+                                    cable("b.out", "m.in2"), cable("m.out", "out.left"), cable("m.out", "out.right") } } };
+        QString error;
+        auto patch = M::Patch::fromJson(json, &error);
+        EXPECT(patch.has_value());
+        if (patch) {
+            synth->setPatch(*patch, {});
+            synth->initialise({ tracktion::TimePosition(), 44100.0, 512 });
+            bool finite = true;
+            for (int b = 0; b < 200; ++b) {   // ~2.3 s: long past the overflow
+                juce::AudioBuffer<float> buffer(2, 512);
+                te::PluginRenderContext rc(&buffer, juce::AudioChannelSet::stereo(), 0, 512, nullptr, 0.0,
+                                           tracktion::TimeRange(tracktion::TimePosition::fromSeconds(b * 512 / 44100.0),
+                                                                tracktion::TimePosition::fromSeconds((b + 1) * 512 / 44100.0)),
+                                           true, false, false, false);
+                synth->applyToBuffer(rc);
+                for (int ch = 0; ch < 2; ++ch)
+                    for (int i = 0; i < 512; ++i)
+                        finite = finite && std::isfinite(buffer.getSample(ch, i));
+            }
+            EXPECT(finite);
+            synth->setPatch(M::Patch::initPatch(), {});
+        }
+    }
+
     ModularEditorView view(&editMgr);
     view.resize(1400, 900);
     view.show();
