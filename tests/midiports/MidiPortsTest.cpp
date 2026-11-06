@@ -19,6 +19,9 @@
 #include <QJsonObject>
 #include <QSettings>
 #include <cstdio>
+#if defined(__APPLE__)
+#include <unistd.h>
+#endif
 #include <mutex>
 #include <vector>
 
@@ -131,6 +134,41 @@ int main(int argc, char** argv)
         return 0;
     }
 
+#if JUCE_MAC
+    // CoreMIDI refuses MIDI to a process started just after another MIDI
+    // process quit (as the test before this one in ctest), for that process's
+    // whole life. Start again, fresh, a moment later.
+    if (!juce::ump::Endpoints::getInstance()->getBackend()) {
+        const int tries = qEnvironmentVariableIntValue("OPENDAW_MIDI_TEST_RELAUNCH");
+        if (tries < 5) {
+            std::printf("CoreMIDI refused this process; starting again in 2 s\n");
+            std::fflush(stdout);
+            juce::Thread::sleep(2000);
+            qputenv("OPENDAW_MIDI_TEST_RELAUNCH", QByteArray::number(tries + 1));
+            execv(argv[0], argv);
+        }
+        std::printf("FAIL: CoreMIDI is unavailable\n");
+        return 1;
+    }
+#endif
+
+    // A previous run's ports linger in CoreMIDI for a moment after it exits;
+    // with two of each name the checks below would talk to the stale ones.
+    {
+        QElapsedTimer waited;
+        waited.start();
+        const bool gone = waitFor([] {
+            return !hasDevice(juce::MidiOutput::getAvailableDevices(), VirtualMidiPorts::kInName)
+                && !hasDevice(juce::MidiInput::getAvailableDevices(), VirtualMidiPorts::kOutName);
+        }, 10000);
+        if (!gone)
+            std::printf("Another \"%s\" port is still published (is OpenDaw running?). Close it and run again.\n",
+                        VirtualMidiPorts::kInName);
+        else if (waited.elapsed() > 50)
+            std::printf("(waited %d ms for a previous run's ports to go)\n", int(waited.elapsed()));
+        if (!gone) return 1;
+    }
+
     JuceQtBridge bridge;
     bridge.start();
     AudioEngine engine;
@@ -142,7 +180,8 @@ int main(int argc, char** argv)
 
     // ── The ports exist for other apps ──
     std::printf("ports published\n");
-    EXPECT(ports.isEnabled());
+    // Creation is retried while CoreMIDI still holds a closed app's ports.
+    EXPECT(waitFor([&] { return ports.isEnabled(); }, 11000));
     EXPECT(waitFor([] { return hasDevice(juce::MidiOutput::getAvailableDevices(), VirtualMidiPorts::kInName); }));
     EXPECT(waitFor([] { return hasDevice(juce::MidiInput::getAvailableDevices(), VirtualMidiPorts::kOutName); }));
     settle(300);   // Tracktion's rescan

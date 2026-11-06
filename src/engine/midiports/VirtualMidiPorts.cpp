@@ -71,28 +71,18 @@ bool VirtualMidiPorts::enabledInSettings()
 
 void VirtualMidiPorts::setEnabled(bool enabled)
 {
-    if (!supported() || enabled == isEnabled()) return;
+    if (!enabled) {
+        stopTimer();   // a pending retry too
+        createRetriesLeft_ = 0;
+    }
+    if (!supported() || enabled == isEnabled() || (enabled && isTimerRunning())) return;
     auto& dm = engine_.getDeviceManager();
 
     if (enabled) {
-        virtualIn_ = juce::MidiInput::createNewDevice(kInName, this);
-        if (!virtualIn_) {
-            juce::Logger::writeToLog("Virtual MIDI: could not create '" + juce::String(kInName) + "'");
-            return;
+        if (!createPorts()) {
+            createRetriesLeft_ = 20;   // 10 s
+            startTimer(500);
         }
-        virtualIn_->start();
-        {
-            const juce::ScopedLock sl(lock_);
-            virtualOut_ = juce::MidiOutput::createNewDevice(kOutName);
-            if (!virtualOut_) juce::Logger::writeToLog("Virtual MIDI: could not create '" + juce::String(kOutName) + "'");
-        }
-        // The input reaches tracks through a Tracktion virtual input of the
-        // same name. Tracktion keeps those names in its settings and makes
-        // the devices on its next scan, which may not have run yet: so add
-        // the name if it's missing (that rescans), else rescan anyway.
-        if (dm.createVirtualMidiDevice(kInName).failed())
-            dm.rescanMidiDeviceList();
-        findTracktionInput();   // and again when the rescan reports a change
         return;
     }
 
@@ -112,6 +102,40 @@ void VirtualMidiPorts::setEnabled(bool enabled)
                 dm.deleteVirtualMidiDevice(*v);
                 break;
             }
+}
+
+bool VirtualMidiPorts::createPorts()
+{
+    auto& dm = engine_.getDeviceManager();
+    virtualIn_ = juce::MidiInput::createNewDevice(kInName, this);
+    if (!virtualIn_) return false;
+    virtualIn_->start();
+    {
+        const juce::ScopedLock sl(lock_);
+        virtualOut_ = juce::MidiOutput::createNewDevice(kOutName);
+        if (!virtualOut_) juce::Logger::writeToLog("Virtual MIDI: could not create '" + juce::String(kOutName) + "'");
+    }
+    // The input reaches tracks through a Tracktion virtual input of the
+    // same name. Tracktion keeps those names in its settings and makes
+    // the devices on its next scan, which may not have run yet: so add
+    // the name if it's missing (that rescans), else rescan anyway.
+    if (dm.createVirtualMidiDevice(kInName).failed())
+        dm.rescanMidiDeviceList();
+    findTracktionInput();   // and again when the rescan reports a change
+    return true;
+}
+
+void VirtualMidiPorts::timerCallback()
+{
+    if (isEnabled() || createPorts()) {
+        stopTimer();
+        return;
+    }
+    if (--createRetriesLeft_ <= 0) {
+        stopTimer();
+        juce::Logger::writeToLog("Virtual MIDI: could not create '" + juce::String(kInName)
+                                 + "' (is another OpenDaw running?)");
+    }
 }
 
 void VirtualMidiPorts::setClockEnabled(bool on)

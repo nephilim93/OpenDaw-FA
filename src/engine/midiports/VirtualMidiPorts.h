@@ -45,7 +45,8 @@ private:
 // tracks to any system MIDI output.
 class VirtualMidiPorts : private juce::MidiInputCallback,
                          private juce::ChangeListener,
-                         private juce::Thread {
+                         private juce::Thread,
+                         private juce::Timer {
 public:
     static constexpr const char* kInName = "OpenDaw In";
     static constexpr const char* kOutName = "OpenDaw Out";
@@ -99,6 +100,8 @@ private:
     void handleIncomingMidiMessage(juce::MidiInput*, const juce::MidiMessage&) override;
     void changeListenerCallback(juce::ChangeBroadcaster*) override;
     void run() override;
+    void timerCallback() override;   // retries creating the ports
+    bool createPorts();
 
     void findTracktionInput();
     juce::MidiOutput* outputFor(const juce::String& destination);
@@ -107,6 +110,9 @@ private:
 
     te::Engine& engine_;
     std::unique_ptr<juce::MidiInput> virtualIn_;
+    // CoreMIDI keeps a closed app's ports for a moment, under the same IDs we
+    // need: creating ours fails until they go, so it is retried.
+    int createRetriesLeft_ = 0;
     std::shared_ptr<juce::MidiOutput> virtualOut_;
 
     juce::SpinLock inputLock_;
