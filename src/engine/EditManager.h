@@ -192,6 +192,9 @@ public:
         QString timestamp;
     };
     static QList<RecoveryInfo> findRecoveryFiles();
+    // Opens an autosave as the project it came from (none for an untitled
+    // one, so Save asks where), unsaved. The autosave file is deleted.
+    bool restoreRecovery(const RecoveryInfo& info);
 
     // Linked MIDI channel clips
     te::MidiClip* addLinkedMidiChannel(te::AudioTrack& track,
