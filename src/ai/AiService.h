@@ -104,7 +104,9 @@ private:
     void handleLocalStreamChunk();
     void handleStreamFinished();
     void processAssistantResponse();
-    void executeToolCalls(const QVector<AiToolCall>& calls);
+    // Runs the reply's tool calls that have no result yet, in order, stopping
+    // at a destructive one to ask the user; then sends all the results.
+    void runPendingToolCalls();
     void continueAfterToolResults(const QVector<AiToolResult>& results,
                                   const AiMessage& assistantMsg);
     QString buildSystemPrompt() const;
@@ -146,7 +148,9 @@ private:
     static constexpr int MAX_TOOL_ROUNDS = 20;
     int toolRoundCount_ = 0;
 
-    QSet<QString> executedToolIds_;
+    // Results of the tool calls run so far in this reply, by call id: kept
+    // while a destructive call waits for the user, then all sent together.
+    QMap<QString, AiToolResult> toolResults_;
 };
 
 } // namespace OpenDaw
