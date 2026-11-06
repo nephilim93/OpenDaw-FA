@@ -20,6 +20,7 @@
 #include "ui/modular/FaustCodeDialog.h"
 #include "ui/modular/ModularEditorView.h"
 #include "ui/mixer/MixerView.h"
+#include "ui/dialogs/AudioSettingsPage.h"
 #include "ui/effects/EffectChainWidget.h"
 #include "ui/timeline/TimelineView.h"
 #include "ui/modular/ModulePanelItem.h"
@@ -997,6 +998,26 @@ int main(int argc, char** argv)
 
         wav.deleteFile();
         quiet.deleteFile();
+    }
+
+    // ── The audio settings page doesn't freeze the window on a change ──
+    std::printf("audio settings page\n");
+    {
+        AudioSettingsPage page(engine);
+        auto* box = page.findChild<QCheckBox*>();
+        EXPECT(box != nullptr);
+        if (box) {
+            const bool was = box->isChecked();
+            QElapsedTimer t;
+            t.start();
+            box->toggle();
+            EXPECT(t.elapsed() < 50);   // it used to wait 100 ms in the handler
+            settle(300);
+            EXPECT(AudioEngine::allChannelsInSettings() == !was);
+            box->toggle();
+            settle(300);
+            EXPECT(AudioEngine::allChannelsInSettings() == was);
+        }
     }
 
     // ── Undoing a new track with the timeline and mixer open (it crashed) ──

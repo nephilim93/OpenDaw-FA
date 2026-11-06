@@ -1,4 +1,5 @@
 #include "AudioSettingsPage.h"
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QCheckBox>
 #include <QFormLayout>
@@ -57,10 +58,11 @@ AudioSettingsPage::AudioSettingsPage(AudioEngine& engine, QWidget* parent)
     form->addRow("Channels:", allChannels_);
     connect(allChannels_, &QCheckBox::toggled, this, [this](bool on) {
         engine_.setAllChannels(on);
-        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
-        engine_.saveAudioSettings();
-        if (onDeviceChanged_) onDeviceChanged_();
-        populateDevices();
+        afterDeviceChange([this] {
+            engine_.saveAudioSettings();
+            if (onDeviceChanged_) onDeviceChanged_();
+            populateDevices();
+        });
     });
 
     mainLayout->addWidget(group);
@@ -105,12 +107,13 @@ AudioSettingsPage::AudioSettingsPage(AudioEngine& engine, QWidget* parent)
         auto& types = adm.getAvailableDeviceTypes();
         if (idx < 0 || idx >= types.size()) return;
         adm.setCurrentAudioDeviceType(types[idx]->getTypeName(), true);
-        juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
-        engine_.applyChannelSetting();
-        populateDevices();
-        updateDriverNote();
-        engine_.saveAudioSettings();
-        if (onDeviceChanged_) onDeviceChanged_();
+        afterDeviceChange([this] {
+            engine_.applyChannelSetting();
+            populateDevices();
+            updateDriverNote();
+            engine_.saveAudioSettings();
+            if (onDeviceChanged_) onDeviceChanged_();
+        });
     });
 
     connect(inputCombo_, &QComboBox::activated, this, [this]() {
@@ -152,20 +155,28 @@ void AudioSettingsPage::applySetup(
     change(setup);
 
     auto error = adm.setAudioDeviceSetup(setup, true);
-    juce::MessageManager::getInstance()->runDispatchLoopUntil(100);
-    // A new device opens its first pair: keep the channel choice.
-    if (error.isEmpty()) engine_.applyChannelSetting();
+    afterDeviceChange([this, error] {
+        // A new device opens its first pair: keep the channel choice.
+        if (error.isEmpty()) engine_.applyChannelSetting();
 
-    if (error.isNotEmpty()) {
-        errorLabel_->setText("Could not apply the audio settings: " + toQ(error));
-        errorLabel_->show();
-    } else {
-        errorLabel_->hide();
-        engine_.saveAudioSettings();
-        if (onDeviceChanged_) onDeviceChanged_();
-    }
+        if (error.isNotEmpty()) {
+            errorLabel_->setText("Could not apply the audio settings: " + toQ(error));
+            errorLabel_->show();
+        } else {
+            errorLabel_->hide();
+            engine_.saveAudioSettings();
+            if (onDeviceChanged_) onDeviceChanged_();
+        }
 
-    populateDevices();
+        populateDevices();
+    });
+}
+
+// Tracktion makes the new device's inputs and outputs asynchronously: the
+// follow-up runs once they exist, without blocking the window meanwhile.
+void AudioSettingsPage::afterDeviceChange(std::function<void()> then)
+{
+    QTimer::singleShot(100, this, std::move(then));
 }
 
 void AudioSettingsPage::populateDeviceTypes()

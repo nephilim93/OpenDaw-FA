@@ -26,6 +26,7 @@ private:
     void populateSampleRates();
     void populateBufferSizes();
     void applySetup(const std::function<void(juce::AudioDeviceManager::AudioDeviceSetup&)>& change);
+    void afterDeviceChange(std::function<void()> then);
     void updateDriverNote();
     void updateLatency();
 
