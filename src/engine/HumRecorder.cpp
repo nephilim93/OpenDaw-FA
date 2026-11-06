@@ -128,6 +128,16 @@ HumRecorder::HumRecorder(EditManager& editMgr, QObject* parent)
     timer_.setInterval(50);
     connect(&timer_, &QTimer::timeout, this, &HumRecorder::poll);
     connect(&editMgr_, &EditManager::clipsRecorded, this, &HumRecorder::takeRecorded);
+    // Another project opens mid-take: the take's arming and count-in belong
+    // to the old one and are dropped; the input's monitoring is put back.
+    connect(&editMgr_, &EditManager::aboutToChangeEdit, this, [this] {
+        if (state_ == State::Idle) return;
+        trackId_ = {};
+        armedBefore_.clear();
+        countInBefore_.reset();
+        onsetSeconds_.reset();
+        restore();
+    });
 }
 
 HumRecorder::~HumRecorder()
