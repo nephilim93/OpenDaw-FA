@@ -21,6 +21,7 @@ public:
 
     // Patch access (message thread).
     Modular::Patch patch() const { return patch_; }
+    int rebuildCount() const { return rebuilds_; }   // for tests: full recompiles so far
     te::AutomatableParameter* macro(int index) const
     {
         return index >= 0 && index < Modular::kNumMacros ? macros_[size_t(index)].get() : nullptr;
@@ -54,6 +55,7 @@ protected:
 private:
     void loadPatchFromState();
     void recompile();
+    int rebuilds_ = 0;
     void handleMidi(Modular::CompiledPatch& cp, const juce::MidiMessage& m);
 
     juce::CachedValue<juce::String> patchJson_;
