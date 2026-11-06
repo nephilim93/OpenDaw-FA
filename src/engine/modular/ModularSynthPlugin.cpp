@@ -177,9 +177,12 @@ void ModularSynthPlugin::applyToBuffer(const te::PluginRenderContext& fc)
             cp.render(renderL_.data(), renderR_.data(), n, macroValues, t);
             if (dest) {
                 // Gentle limiter: transparent at normal levels, never above 1.
+                // A NaN (a runaway feedback patch) becomes silence, never
+                // reaching the plugins after this one.
+                auto limit = [](float v) { return std::isnan(v) ? 0.0f : std::tanh(v); };
                 for (int i = 0; i < n; ++i) {
-                    const float l = std::tanh(renderL_[size_t(i)]);
-                    const float r = std::tanh(renderR_[size_t(i)]);
+                    const float l = limit(renderL_[size_t(i)]);
+                    const float r = limit(renderR_[size_t(i)]);
                     if (dest->getNumChannels() > 0)
                         dest->setSample(0, fc.bufferStartSample + from + i, l);
                     if (dest->getNumChannels() > 1)
