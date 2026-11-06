@@ -10,6 +10,7 @@
 #include "engine/HumRecorder.h"
 #include "engine/MelodyToMidi.h"
 #include "ai/AiToolExecutor.h"
+#include "ai/AiService.h"
 #include "engine/PluginScanner.h"
 #include "drums/SampleLibrary.h"
 #include "engine/drums/DrumMachinePlugin.h"
@@ -33,6 +34,8 @@
 #include <QMouseEvent>
 #include <QPushButton>
 #include <QTemporaryDir>
+#include <QTcpServer>
+#include <QTcpSocket>
 #include <cstdio>
 
 using namespace OpenDaw;
@@ -1067,6 +1070,79 @@ int main(int argc, char** argv)
         EXPECT(editMgr.currentFile() == song && editMgr.saveEdit() && song.existsAsFile());
         EXPECT(!autosave.existsAsFile());
         dir.deleteRecursively();
+    // ── A confirmed destructive call: the results of the calls before it are sent too ──
+    // (a fake local server, so no paid API)
+    std::printf("assistant confirm\n");
+    {
+        view.setTrack(nullptr);
+        editMgr.addAudioTrack()->setName("Keep");
+        editMgr.addAudioTrack()->setName("Gone");
+        QTcpServer server;
+        EXPECT(server.listen(QHostAddress::LocalHost));
+        QList<QJsonObject> requests;
+        auto sse = [](const QJsonObject& delta, const QString& finish) {
+            QJsonObject choice{ { "index", 0 }, { "delta", delta } };
+            if (!finish.isEmpty()) choice["finish_reason"] = finish;
+            return "data: " + QJsonDocument(QJsonObject{ { "choices", QJsonArray{ choice } } })
+                                  .toJson(QJsonDocument::Compact) + "\n\n";
+        };
+        auto call = [](int i, const QString& id, const QString& name, const QJsonObject& args) {
+            return QJsonObject{ { "index", i }, { "id", id }, { "type", "function" },
+                                { "function", QJsonObject{ { "name", name },
+                                    { "arguments", QString(QJsonDocument(args).toJson(QJsonDocument::Compact)) } } } };
+        };
+        QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+            auto* sock = server.nextPendingConnection();
+            auto buf = std::make_shared<QByteArray>();
+            QObject::connect(sock, &QTcpSocket::readyRead, sock, [&, sock, buf] {
+                buf->append(sock->readAll());
+                const int end = buf->indexOf("\r\n\r\n");
+                if (end < 0) return;
+                const auto head = buf->left(end).toLower();
+                const int at = head.indexOf("content-length:");
+                const int len = at < 0 ? 0 : head.mid(at + 15, head.indexOf("\r\n", at) - at - 15).trimmed().toInt();
+                if (buf->size() < end + 4 + len) return;
+                requests.append(QJsonDocument::fromJson(buf->mid(end + 4, len)).object());
+                QByteArray body;
+                if (requests.size() == 1) {
+                    body += sse(QJsonObject{ { "tool_calls", QJsonArray{
+                        call(0, "c1", "set_track_volume", { { "track", "Keep" }, { "volume_db", -6.0 } }),
+                        call(1, "c2", "delete_track", { { "track", "Gone" } }) } } }, {});
+                    body += sse({}, "tool_calls");
+                } else {
+                    body += sse(QJsonObject{ { "content", "Done." } }, "stop");
+                }
+                body += "data: [DONE]\n\n";
+                sock->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: "
+                            + QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                sock->disconnectFromHost();
+            });
+        });
+        AiService::setProvider("local");
+        AiService::setLocalBaseUrl(QString("http://127.0.0.1:%1/v1").arg(server.serverPort()));
+        AiService::setLocalModel("fake");
+        AiService::setLocalUseTools(true);
+        AiService::setConfirmDestructive(true);
+        AiService ai(&editMgr, &engine, nullptr);
+        int asked = 0;
+        QObject::connect(&ai, &AiService::confirmDestructiveAction, &ai,
+                         [&](const QString&, const AiToolCall& c) { ++asked; ai.executeConfirmedTool(c); });
+        bool done = false;
+        QObject::connect(&ai, &AiService::responseComplete, &ai, [&] { done = true; });
+        ai.sendMessage("Turn Keep down and delete Gone");
+        QElapsedTimer t;
+        t.start();
+        while (!done && t.elapsed() < 10000) settle(50);
+        EXPECT(done && asked == 1 && requests.size() == 2);
+        QSet<QString> answered;
+        if (requests.size() == 2)
+            for (const auto& m : requests[1]["messages"].toArray())
+                if (m.toObject()["role"] == "tool") answered.insert(m.toObject()["tool_call_id"].toString());
+        EXPECT(answered == (QSet<QString>{ "c1", "c2" }));
+        int gone = 0;
+        for (auto* tr : te::getAudioTracks(*editMgr.edit())) if (tr->getName() == "Gone") ++gone;
+        EXPECT(gone == 0);
+        AiService::setProvider("anthropic");
     }
 
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);

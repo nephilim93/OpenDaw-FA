@@ -396,7 +396,7 @@ void AiService::clearConversation()
     }
     conversationHistory_.clear();
     toolRoundCount_ = 0;
-    executedToolIds_.clear();
+    toolResults_.clear();
     setBusy(false);
 }
 
@@ -907,97 +907,65 @@ void AiService::processAssistantResponse()
 
     if (assistantMsg.hasToolUse() && toolRoundCount_ < MAX_TOOL_ROUNDS) {
         toolRoundCount_++;
-        QVector<AiToolCall> calls;
-        for (auto& block : assistantMsg.content) {
-            if (block.type == "tool_use")
-                calls.append(block.toolCall);
-        }
-        executeToolCalls(calls);
+        toolResults_.clear();
+        runPendingToolCalls();
     } else {
         emit responseComplete(assistantMsg);
         setBusy(false);
     }
 }
 
-void AiService::executeToolCalls(const QVector<AiToolCall>& calls)
+void AiService::runPendingToolCalls()
 {
-    executedToolIds_.clear();
+    const AiMessage assistantMsg = conversationHistory_.last();
     QVector<AiToolResult> results;
 
     toolExecutor_->beginBatch();
-
-    for (auto& call : calls) {
-        if (confirmDestructive() && toolExecutor_->isDestructive(call.name)) {
-            toolExecutor_->endBatch();
-            emit confirmDestructiveAction(call.name, call);
-            return;
+    for (auto& block : assistantMsg.content) {
+        if (block.type != "tool_use") continue;
+        const auto& call = block.toolCall;
+        if (!toolResults_.contains(call.id)) {
+            if (confirmDestructive() && toolExecutor_->isDestructive(call.name)) {
+                toolExecutor_->endBatch();
+                emit confirmDestructiveAction(call.name, call);
+                return;
+            }
+            auto result = toolExecutor_->execute(call);
+            toolResults_.insert(call.id, result);
+            emit toolCallFinished(call.name, call.id, result.content, result.isError);
         }
-
-        auto result = toolExecutor_->execute(call);
-        results.append(result);
-        executedToolIds_.insert(call.id);
-
-        emit toolCallFinished(call.name, call.id, result.content, result.isError);
+        results.append(toolResults_.value(call.id));
     }
-
     toolExecutor_->endBatch();
 
-    AiMessage assistantMsg = conversationHistory_.last();
     continueAfterToolResults(results, assistantMsg);
 }
 
 void AiService::executeConfirmedTool(const AiToolCall& call)
 {
     auto result = toolExecutor_->execute(call);
+    toolResults_.insert(call.id, result);
     emit toolCallFinished(call.name, call.id, result.content, result.isError);
-    executedToolIds_.insert(call.id);
-
-    AiMessage assistantMsg = conversationHistory_.last();
-    QVector<AiToolResult> allResults;
-
-    for (auto& block : assistantMsg.content) {
-        if (block.type == "tool_use") {
-            if (block.toolCall.id == call.id) {
-                allResults.append(result);
-            } else if (executedToolIds_.contains(block.toolCall.id)) {
-                continue;
-            } else if (confirmDestructive() && toolExecutor_->isDestructive(block.toolCall.name)) {
-                emit confirmDestructiveAction(block.toolCall.name, block.toolCall);
-                return;
-            } else {
-                auto existingResult = toolExecutor_->execute(block.toolCall);
-                allResults.append(existingResult);
-                executedToolIds_.insert(block.toolCall.id);
-                emit toolCallFinished(block.toolCall.name, block.toolCall.id,
-                                     existingResult.content, existingResult.isError);
-            }
-        }
-    }
-
-    continueAfterToolResults(allResults, assistantMsg);
+    runPendingToolCalls();
 }
 
 void AiService::cancelPendingTool(const AiToolCall& call)
 {
-    AiToolResult cancelResult;
-    cancelResult.toolUseId = call.id;
-    cancelResult.content = "User cancelled this action.";
-    cancelResult.isError = true;
-
     AiMessage assistantMsg = conversationHistory_.last();
     QVector<AiToolResult> results;
     for (auto& block : assistantMsg.content) {
-        if (block.type == "tool_use") {
-            if (block.toolCall.id == call.id)
-                results.append(cancelResult);
-            else {
-                AiToolResult skipResult;
-                skipResult.toolUseId = block.toolCall.id;
-                skipResult.content = "Skipped because another tool was cancelled.";
-                skipResult.isError = true;
-                results.append(skipResult);
-            }
+        if (block.type != "tool_use") continue;
+        const auto& id = block.toolCall.id;
+        if (toolResults_.contains(id)) {
+            results.append(toolResults_.value(id));   // it already ran
+            continue;
         }
+        AiToolResult r;
+        r.toolUseId = id;
+        r.content = id == call.id ? "User cancelled this action."
+                                  : "Skipped because another tool was cancelled.";
+        r.isError = true;
+        results.append(r);
     }
     continueAfterToolResults(results, assistantMsg);
 }
