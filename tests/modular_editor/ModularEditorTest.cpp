@@ -1048,6 +1048,9 @@ int main(int argc, char** argv)
         good.setReadOnly(false);
         dir.setReadOnly(false);
         EXPECT(editMgr.saveEdit() && !editMgr.hasUnsavedChanges());
+        dir.deleteRecursively();
+    }
+
     // ── Restoring an autosave opens it as its own project, not the autosave ──
     std::printf("restore recovery\n");
     {
@@ -1070,6 +1073,8 @@ int main(int argc, char** argv)
         EXPECT(editMgr.currentFile() == song && editMgr.saveEdit() && song.existsAsFile());
         EXPECT(!autosave.existsAsFile());
         dir.deleteRecursively();
+    }
+
     // ── A confirmed destructive call: the results of the calls before it are sent too ──
     // (a fake local server, so no paid API)
     std::printf("assistant confirm\n");
