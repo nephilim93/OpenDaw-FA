@@ -1364,6 +1364,35 @@ int main(int argc, char** argv)
         AiService::setProvider("anthropic");
     }
 
+    // ── Opening another project during a Hum take leaves the new one alone ──
+    std::printf("hum across a project change\n");
+    {
+        view.setTrack(nullptr);
+        HumRecorder hum(editMgr);
+        HumRecorder::setStartMode(HumRecorder::StartMode::Threshold);
+        HumRecorder::setThresholdDb(-6.0);
+        QString error;
+        te::InputDevice* dev = nullptr;
+        editMgr.edit()->setCountInMode(te::Edit::CountIn::twoBar);   // the old project's own
+        if (hum.start(&error)) {
+            for (auto* in : editMgr.edit()->getAllInputDevices())
+                if (in->getTargets().size() > 0) dev = &in->getInputDevice();
+            EXPECT(hum.state() == HumRecorder::State::Waiting);
+            editMgr.newEdit();
+            settle(200);
+            EXPECT(hum.state() == HumRecorder::State::Idle);
+            EXPECT(editMgr.edit()->getCountInMode() == te::Edit::CountIn::none);
+            bool armed = false;
+            for (auto* in : editMgr.edit()->getAllInputDevices())
+                for (auto id : in->getTargets()) armed = armed || in->isRecordingEnabled(id);
+            EXPECT(!armed);   // nothing armed from the old project's track ids
+            if (dev) EXPECT(dev->getMonitorMode() != te::InputDevice::MonitorMode::off);
+        } else {
+            std::printf("  (skipped: %s)\n", error.toUtf8().constData());
+        }
+        HumRecorder::setStartMode(HumRecorder::StartMode::CountIn);
+    }
+
     std::printf(failures ? "\n%d check(s) FAILED\n" : "\nall checks passed\n", failures);
     view.setTrack(nullptr);
     return failures ? 1 : 0;
