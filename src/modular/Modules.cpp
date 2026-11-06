@@ -90,7 +90,8 @@ public:
         const double maxHz = sampleRate_ * 0.45;
 
         for (int i = 0; i < ctx.numSamples; ++i) {
-            const double octave = in[0][i] + baseOct + in[1][i] * fmDepth;
+            const double o = in[0][i] + baseOct + in[1][i] * fmDepth;
+            const double octave = std::isfinite(o) ? o : baseOct;   // a NaN would stick in phase_
             const double hz = std::clamp(kC4Hz * std::exp2(octave), 0.1, maxHz);
             const double dt = hz / sampleRate_;
             const double t = phase_;
@@ -159,19 +160,20 @@ public:
         const double maxHz = sampleRate_ * 0.45;
 
         for (int i = 0; i < ctx.numSamples; ++i) {
+            const double mod = double(in[1][i] * depth + in[2][i] * keyTrack);
             const double hz = std::clamp(
-                double(cutoff) * std::exp2(double(in[1][i] * depth + in[2][i] * keyTrack)),
-                20.0, maxHz);
+                double(cutoff) * std::exp2(std::isfinite(mod) ? mod : 0.0), 20.0, maxHz);
             const double g = std::tan(3.141592653589793 * hz / sampleRate_);
             const double a1 = 1.0 / (1.0 + g * (g + k));
             const double a2 = g * a1, a3 = g * a2;
 
-            const double x = in[0][i];
+            const double x = std::isfinite(in[0][i]) ? in[0][i] : 0.0;
             const double v3 = x - ic2_;
             const double v1 = a1 * ic1_ + a2 * v3;
             const double v2 = ic2_ + a2 * ic1_ + a3 * v3;
             ic1_ = 2.0 * v1 - ic1_;
             ic2_ = 2.0 * v2 - ic2_;
+            if (!std::isfinite(ic1_) || !std::isfinite(ic2_)) ic1_ = ic2_ = 0.0;   // never stuck
 
             double y = v2;                                  // low pass
             if (mode == 1) y = x - k * v1 - v2;             // high pass

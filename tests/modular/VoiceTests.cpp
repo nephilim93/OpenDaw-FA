@@ -167,6 +167,26 @@ TEST(feedback, cycle_compiles_and_stays_finite)
     if (plain) CHECK(plain->numFeedbackCables() == 0);
 }
 
+TEST(feedback, runaway_nan_does_not_stick)
+{
+    // A loop that grows to infinity, and its inverse: summed they make NaN,
+    // which goes into a filter and an oscillator's pitch.
+    auto cp = compile(patchJson(
+        { mod("a", "scale", { { "scale", 2 }, { "offset", 1 } }, "global"),
+          mod("b", "scale", { { "scale", -1 } }, "global"),
+          mod("m", "mixer", { { "master", 1 } }, "global"),
+          mod("f", "vcf", {}, "global"), mod("osc", "vco", {}, "global"),
+          mod("out", "output") },
+        { cable("a.out", "a.in"), cable("a.out", "b.in"), cable("a.out", "m.in1"), cable("b.out", "m.in2"),
+          cable("m.out", "f.in"), cable("m.out", "osc.pitch"),
+          cable("f.out", "out.left"), cable("osc.out", "out.right") }));
+    if (!cp) return;
+    const auto out = renderPatch(*cp, int(kRate));
+    CHECK(allFinite(out.left) && allFinite(out.right));
+    // The oscillator keeps running at its base pitch instead of freezing.
+    CHECK(rms(out.right, int(kRate) / 2, int(kRate)) > 0.01);
+}
+
 TEST(voices, steal_oldest_when_full)
 {
     auto cp = compile(voiceProbePatch());
