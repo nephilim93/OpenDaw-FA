@@ -585,7 +585,12 @@ void AiService::sendToApi()
         messages.append(messageToJson(msg));
     body["messages"] = messages;
 
+    // Tests point this at a fake server on this computer; nothing else is
+    // accepted, so the key never goes anywhere but Anthropic.
     QUrl apiUrl(kApiUrl);
+    if (const QUrl test(qEnvironmentVariable("OPENDAW_TEST_CLAUDE_URL"));
+        test.isValid() && test.scheme() == "http" && test.host() == "127.0.0.1")
+        apiUrl = test;
     QNetworkRequest request{apiUrl};
     request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
     request.setRawHeader("x-api-key", apiKey().toUtf8());

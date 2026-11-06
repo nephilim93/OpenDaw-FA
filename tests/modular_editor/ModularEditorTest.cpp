@@ -1364,6 +1364,107 @@ int main(int argc, char** argv)
         AiService::setProvider("anthropic");
     }
 
+    // ── The Claude path, against a fake server on this computer (no paid API) ──
+    std::printf("assistant claude path\n");
+    {
+        auto* t = editMgr.addAudioTrack();
+        t->setName("Claude");
+        // Serves the replies in order, one per request, as Anthropic's stream.
+        QTcpServer server;
+        EXPECT(server.listen(QHostAddress::LocalHost));
+        QList<QByteArray> replies;
+        int requests = 0;
+        QObject::connect(&server, &QTcpServer::newConnection, &server, [&] {
+            auto* sock = server.nextPendingConnection();
+            auto buf = std::make_shared<QByteArray>();
+            QObject::connect(sock, &QTcpSocket::readyRead, sock, [&, sock, buf] {
+                buf->append(sock->readAll());
+                const int end = buf->indexOf("\r\n\r\n");
+                if (end < 0) return;
+                const auto head = buf->left(end).toLower();
+                const int at = head.indexOf("content-length:");
+                const int len = at < 0 ? 0 : head.mid(at + 15, head.indexOf("\r\n", at) - at - 15).trimmed().toInt();
+                if (buf->size() < end + 4 + len) return;
+                const QByteArray body = requests < replies.size() ? replies[requests] : QByteArray();
+                ++requests;
+                sock->write("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nConnection: close\r\nContent-Length: "
+                            + QByteArray::number(body.size()) + "\r\n\r\n" + body);
+                sock->disconnectFromHost();
+            });
+        });
+        auto ev = [](const QJsonObject& o) {
+            return "event: " + o["type"].toString().toUtf8() + "\ndata: " + QJsonDocument(o).toJson(QJsonDocument::Compact) + "\n\n";
+        };
+        auto toolStart = [&](const QString& id, const QString& name) {
+            return ev({ { "type", "content_block_start" }, { "index", 0 },
+                        { "content_block", QJsonObject{ { "type", "tool_use" }, { "id", id }, { "name", name }, { "input", QJsonObject{} } } } });
+        };
+        auto json = [&](const QString& partial) {
+            return ev({ { "type", "content_block_delta" }, { "index", 0 },
+                        { "delta", QJsonObject{ { "type", "input_json_delta" }, { "partial_json", partial } } } });
+        };
+        const QByteArray start = ev({ { "type", "message_start" }, { "message", QJsonObject{ { "model", "fake" } } } });
+        const QByteArray stop = ev({ { "type", "content_block_stop" }, { "index", 0 } });
+        auto finish = [&](const QString& reason) {
+            return ev({ { "type", "message_delta" }, { "delta", QJsonObject{ { "stop_reason", reason } } } })
+                 + ev({ { "type", "message_stop" } });
+        };
+        const QByteArray textReply = start
+            + ev({ { "type", "content_block_start" }, { "index", 0 }, { "content_block", QJsonObject{ { "type", "text" }, { "text", "" } } } })
+            + ev({ { "type", "content_block_delta" }, { "index", 0 }, { "delta", QJsonObject{ { "type", "text_delta" }, { "text", "Done." } } } })
+            + stop + finish("end_turn");
+
+        qputenv("OPENDAW_TEST_CLAUDE_URL", QString("http://127.0.0.1:%1/v1/messages").arg(server.serverPort()).toUtf8());
+        AiService::setProvider("anthropic");
+        AiService::setApiKey("test-key");
+        auto wait = [&](const bool& flag) {
+            QElapsedTimer timer;
+            timer.start();
+            while (!flag && timer.elapsed() < 10000) settle(50);
+        };
+
+        // Arguments cut off mid-call: answered with an error, not run.
+        {
+            replies = { start + toolStart("k1", "set_track_volume") + json("{\"track\":\"Claude\",\"volume_db\":-2")
+                            + stop + finish("tool_use"),
+                        textReply };
+            requests = 0;
+            const float before = t->getVolumePlugin()->getVolumeDb();
+            AiService ai(&editMgr, &engine, nullptr);
+            bool done = false;
+            QString said;
+            QObject::connect(&ai, &AiService::responseComplete, &ai, [&] { done = true; });
+            QObject::connect(&ai, &AiService::toolCallFinished, &ai,
+                             [&](const QString&, const QString&, const QString& content, bool) { said = content; });
+            ai.sendMessage("Turn Claude down");
+            wait(done);
+            EXPECT(done && requests == 2 && said.startsWith("Not run"));
+            EXPECT(t->getVolumePlugin()->getVolumeDb() == before);
+        }
+
+        // An error event mid-reply ends the turn: the tool call before it doesn't run.
+        {
+            replies = { start + toolStart("k2", "rename_track") + json("{\"track\":\"Claude\",\"new_name\":\"Renamed\"}") + stop
+                            + ev({ { "type", "error" }, { "error", QJsonObject{ { "type", "overloaded_error" }, { "message", "Overloaded" } } } })
+                            + finish("tool_use"),
+                        textReply };
+            requests = 0;
+            AiService ai(&editMgr, &engine, nullptr);
+            bool failed = false;
+            int ran = 0;
+            QObject::connect(&ai, &AiService::errorOccurred, &ai, [&](const QString&) { failed = true; });
+            QObject::connect(&ai, &AiService::toolCallFinished, &ai, [&] { ++ran; });
+            ai.sendMessage("Rename Claude");
+            wait(failed);
+            settle(500);
+            EXPECT(failed && !ai.isBusy() && ran == 0 && requests == 1);
+            EXPECT(t->getName() == "Claude");
+        }
+
+        qunsetenv("OPENDAW_TEST_CLAUDE_URL");
+        AiService::setApiKey({});
+    }
+
     // ── The assistant's audio analysis across track and project changes (it crashed) ──
     std::printf("analysis lifetime\n");
     {
