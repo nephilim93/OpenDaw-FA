@@ -1,4 +1,5 @@
 #include "ModularSynthPlugin.h"
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <cmath>
 
@@ -10,6 +11,23 @@ const juce::Identifier kPatchId("modularPatch");
 QJsonObject parseJson(const juce::String& text)
 {
     return QJsonDocument::fromJson(QByteArray(text.toRawUTF8())).object();
+}
+
+// The patch without its knob values and panel positions: equal keys mean the
+// compiled patch can be kept.
+QByteArray structureKey(const Modular::Patch& patch)
+{
+    auto json = patch.toJson();
+    QJsonArray modules;
+    for (const auto& v : json["modules"].toArray()) {
+        auto m = v.toObject();
+        m.remove("params");
+        m.remove("x");
+        m.remove("y");
+        modules.append(m);
+    }
+    json["modules"] = modules;
+    return QJsonDocument(json).toJson(QJsonDocument::Compact);
 }
 
 juce::String toJsonString(const Modular::Patch& patch)
@@ -68,12 +86,21 @@ void ModularSynthPlugin::loadPatchFromState()
         for (const auto& warning : parsed->warnings())
             if (warning.startsWith("Code module"))  // a code module this build can't run
                 juce::Logger::writeToLog("Modular Synth: " + juce::String(warning.toStdString()));
-    patch_ = parsed ? *parsed : Modular::Patch::initPatch();
+    auto next = parsed ? *parsed : Modular::Patch::initPatch();
+    // Only knobs moved, or only panels: update the running patch in place,
+    // so held notes and effect tails aren't cut by a rebuild.
+    const bool sameStructure = compiled_ && structureKey(next) == structureKey(patch_);
+    patch_ = std::move(next);
+    if (sameStructure) {
+        const juce::SpinLock::ScopedLockType lock(compiledLock_);
+        if (compiled_->updateParams(patch_)) return;
+    }
     recompile();
 }
 
 void ModularSynthPlugin::recompile()
 {
+    ++rebuilds_;
     auto fresh = Modular::CompiledPatch::build(patch_, sampleRate_);
     {
         const juce::SpinLock::ScopedLockType lock(compiledLock_);

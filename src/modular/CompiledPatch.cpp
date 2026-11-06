@@ -166,6 +166,18 @@ void CompiledPatch::processInstance(Instance& inst, const Node& node, Voice* voi
                          node.params.data());
 }
 
+bool CompiledPatch::updateParams(const Patch& patch)
+{
+    if (patch.modules.size() != nodes_.size()) return false;
+    for (size_t i = 0; i < nodes_.size(); ++i) {
+        const auto& m = patch.modules[i];
+        if (moduleDef(m) != nodes_[i].def) return false;
+        for (int p = 0; p < int(nodes_[i].baseParams.size()); ++p)
+            nodes_[i].baseParams[size_t(p)] = patch.paramValue(m, p);
+    }
+    return true;
+}
+
 void CompiledPatch::renderSubBlock(int n, const float* macros, float* outL, float* outR,
                                    const Transport& transport)
 {

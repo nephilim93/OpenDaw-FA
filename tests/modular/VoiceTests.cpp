@@ -167,6 +167,31 @@ TEST(feedback, cycle_compiles_and_stays_finite)
     if (plain) CHECK(plain->numFeedbackCables() == 0);
 }
 
+TEST(voices, knob_change_keeps_the_note)
+{
+    auto cp = compile(sinePatch());
+    if (!cp) return;
+    cp->noteOn(69, 1.0f);
+    const auto loud = renderPatch(*cp, int(kRate / 4));
+    auto json = sinePatch();
+    auto modules = json["modules"].toArray();
+    for (int i = 0; i < modules.size(); ++i) {
+        auto m = modules[i].toObject();
+        if (m["id"] == "osc") {
+            auto params = m["params"].toObject();
+            params["level"] = 0.5;
+            m["params"] = params;
+            modules[i] = m;
+        }
+    }
+    json["modules"] = modules;
+    CHECK(cp->updateParams(patchFrom(json)));
+    const auto quiet = renderPatch(*cp, int(kRate / 4));   // no new noteOn: the same note
+    const double ratio = rms(quiet.left, 0, int(quiet.left.size())) / rms(loud.left, 0, int(loud.left.size()));
+    CHECK(std::abs(ratio - 0.5) < 0.05);
+    CHECK(!cp->updateParams(patchFrom(voiceProbePatch())));   // other modules: rebuild instead
+}
+
 TEST(voices, steal_oldest_when_full)
 {
     auto cp = compile(voiceProbePatch());

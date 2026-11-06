@@ -33,6 +33,11 @@ public:
 
     int numFeedbackCables() const { return numFeedback_; }
 
+    // Message thread, with the audio thread locked out: takes the patch's
+    // knob values when it has the same modules as this one (else false, and
+    // it needs a rebuild). Notes keep sounding and effect tails keep ringing.
+    bool updateParams(const Patch& patch);
+
 private:
     struct Source { bool global = false; int node = -1; int output = 0; };
 

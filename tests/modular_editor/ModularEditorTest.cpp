@@ -131,6 +131,34 @@ int main(int argc, char** argv)
     synth->setPatch(M::Patch::initPatch(), {});
     auto& um = editMgr.edit()->getUndoManager();
 
+    // A knob or a panel move updates the running patch; a new cable rebuilds it.
+    std::printf("live knob changes\n");
+    {
+        auto p = synth->patch();
+        const int before = synth->rebuildCount();
+        EXPECT(!p.modules.empty());
+        if (!p.modules.empty()) {
+            auto& m = p.modules.front();
+            m.x += 40;
+            synth->setPatch(p, "Move");
+            EXPECT(synth->rebuildCount() == before);
+            const auto* def = M::moduleDef(m);
+            if (def && !def->params.empty()) {
+                const auto& par = def->params.front();
+                EXPECT(M::applyOps(p, QJsonArray{ QJsonObject{ { "op", "set_param" }, { "module", m.id },
+                                                              { "param", QString::fromStdString(par.name) },
+                                                              { "value", (par.min + par.max) / 2 } } }).isEmpty());
+                synth->setPatch(p, "Knob");
+                EXPECT(synth->rebuildCount() == before);
+            }
+            EXPECT(M::applyOps(p, QJsonArray{ QJsonObject{ { "op", "add_module" }, { "id", "extra" },
+                                                          { "type", "noise" } } }).isEmpty());
+            synth->setPatch(p, "Add");
+            EXPECT(synth->rebuildCount() == before + 1);
+            synth->setPatch(M::Patch::initPatch(), {});
+        }
+    }
+
     ModularEditorView view(&editMgr);
     view.resize(1400, 900);
     view.show();
